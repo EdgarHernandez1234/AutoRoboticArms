@@ -4,7 +4,7 @@
 
 ## Refined Idea: I have the hardware components (Arduino Uno R3, DIY simple Robotic Arms) interact with the Software components (Docker, Ubuntu Server, Google Cloud, AI, FastAPI, uvicorn). I will divide this section into standalone hardware and software layers. When I finish refining both, I will move onto weaving them together
 
-## Current Goal For the week: Work more on the Software components:
+## Current Goal For the week: Strengthen the requirements of the Hardware and Software layers respectively
 
 Starting May 16 2026
 
