@@ -15,4 +15,6 @@ May 2026
 
 June 2026
 - Took a step back and separate my layers to make sure they work properly first
+- Organized my folder structure
+- .
 - 

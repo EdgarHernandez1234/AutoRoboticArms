@@ -106,7 +106,7 @@ if __name__ == "__main__":
     # USER NOTE: Swap out the device identifier below with your local system configuration path:
     # Windows Target Ex: 'COM3' or 'COM4'
     # macOS/Linux Target Ex: '/dev/ttyACM0' or '/dev/tty.usbmodem14101'
-    TARGET_PORT = "/dev/tty.usbmodem14101" 
+    TARGET_PORT = "/dev/cu.usbmodem14101" 
     
     host = ConductorHost(port=TARGET_PORT, baudrate=115200)
     host.connect()
