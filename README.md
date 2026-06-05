@@ -1,7 +1,5 @@
 # AutoRoboticArms
 
-## Initial Idea: This is a Summer project where I will have an AI be able to control two robotic hands using simple materials and shift control from one to another. Also a homelab which uses dockers and have an dashboard displaying data from the robotic arms. This is to improve my skills with embedded systems, cloud, and AI. Also Robotics is cool.
-
 ## Refined Idea: I have the hardware components (Arduino Uno R3, DIY simple Robotic Arms) interact with the Software components (Docker, Ubuntu Server, Google Cloud, AI, FastAPI, uvicorn). I will divide this section into standalone hardware and software layers. When I finish refining both, I will move onto weaving them together
 
 ## Current Goal For the week: Focusing on the Hardware layer first
@@ -17,4 +15,4 @@ June 2026
 - Took a step back and separate my layers to make sure they work properly first
 - Organized my folder structure and separated it into the three layers: Created a readme for each folder
 - Currently focusing on working on the Hardware Folder
-- 
+- Switched from unittest to using Pytest for my unit tests
