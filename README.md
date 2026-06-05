@@ -1,6 +1,6 @@
 # AutoRoboticArms
 
-## Refined Idea: I have the hardware components (Arduino Uno R3, DIY simple Robotic Arms) interact with the Software components (Docker, Ubuntu Server, Google Cloud, AI, FastAPI, uvicorn). I will divide this section into standalone hardware and software layers. When I finish refining both, I will move onto weaving them together
+## Refined Idea: Two simply made robotic arms being able to function properly with an ai being able to control them from within my homelab. This Project is meant to expand my knowledge on Embedded Hardware, Software, and Networking. Also Robotics is cool.
 
 ## Current Goal For the week: Focusing on the Hardware layer first
 
