@@ -20,6 +20,11 @@ class AutoRoboticArmConductor:
         Translates target Cartesian coordinates to 3-Axis Joint Angles.
         Returns: (base_angle, shoulder_angle, elbow_angle) bounded 0-180.
         """
+
+        # Execute Spatial Safety Gate
+        if not self.verify_workspace_envelope(x, y, z):
+            # Gracefully abort loop rather than allowing a 'math domain error' crash
+            return None
         # Base Yaw Angle
         base_rad = math.atan2(y, x)
         
@@ -96,6 +101,39 @@ class AutoRoboticArmConductor:
         print(f"RAW HEX:  [ {hex_string} ]")
         print(f"MAPPED:   [ SYNC | ID: {joint_id} | ANG: {angle}° | CRC: 0x{frame[4]:02X} ]")
         print("-" * 60)
+
+    def verify_workspace_envelope(self, x, y, z):
+        """
+        Defensive Workspace Envelope Filter (Spatial Boundary Check).
+        Calculates the 3D Euclidean distance from origin to target.
+        Returns: True if reachable/safe, False if outside physical envelope.
+        """
+        # Calculate absolute straight-line distance in 3D space (Pythagorean extension)
+        target_distance = math.sqrt(x**2 + y**2 + z**2)
+        
+        # Define upper physical reach constraint (Maximum arm extension)
+        max_reach = self.L1 + self.L2
+        
+        # Define lower clearance constraint (Prevents arm from self-colliding with base mechanics)
+        min_reach = abs(self.L1 - self.L2)
+        # Handle zero clearance fallback if links are completely identical lengths
+        if min_reach == 0:
+            min_reach = 2.0  # Safe explicit baseline clearance boundary (cm)
+            
+        # Logging structural diagnostic evaluation to host console
+        # print(f"[DIAG] Target Distance: {target_distance:.2cm} | Bounds: [{min_reach}, {max_reach}]")
+
+        # Evaluate coordinate alignment targets against spatial thresholds
+        if target_distance > max_reach:
+            print(f"[ERR] SPATIAL BOUNDARY VIOLATION: Target ({x}, {y}, {z}) is outside maximum reach envelope ({target_distance:.2f}cm > {max_reach:.1f}cm).")
+            return False
+            
+        if target_distance < min_reach:
+            print(f"[ERR] SPATIAL BOUNDARY VIOLATION: Target ({x}, {y}, {z}) drops inside unsafe internal crash envelope ({target_distance:.2f}cm < {min_reach:.1f}cm).")
+            return False
+            
+        return True
+    
 
 # ==========================================
 # Execution Test Block (Runs Locally on Pi 4)
