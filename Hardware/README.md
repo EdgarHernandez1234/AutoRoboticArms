@@ -11,3 +11,4 @@ Here will be focusing on the embedded systems aspects of my Project
 
 ### Software:
 - Pytest
+- Python venv
