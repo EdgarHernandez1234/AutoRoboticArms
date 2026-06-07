@@ -22,4 +22,5 @@ Here will be focusing on the embedded systems aspects of my Project
 - Updating my project architecture to reflect this on my first sprint for this hardware Layer 
 
 ### Sprint 2: Shifting Left and writing my tests early
-- USing pytest to write a test harness
+- Using pytest to write a test harness
+- Working on Boundary Value Analysis and spatial fuzzing
