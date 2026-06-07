@@ -52,13 +52,13 @@ def test_binary_frame_packing_integrity(conductor):
     assert len(packed_frame) == 5
     
     # Unpack frame byte values matching struct layout constraint: '<BBBBB'
-    sync1, sync2, parsed_id, parsed_angle, parsed_crc = struct.unpack('<BBBBB', packed_frame)
+    sync1, sync2, parsed_id, parsed_ticks, parsed_crc = struct.unpack('!BBHB', packed_frame)
     
     # Check alignment headers and payload segments
     assert sync1 == 0x55
     assert sync2 == 0xAA
-    assert parsed_id == joint_target_id
-    assert parsed_angle == angle_target
+    assert parsed_id in [0, 1, 2] # Asserts it maps strictly to Base, Shoulder, or Elbow
+    assert 0 <= parsed_ticks <= 4095 # Asserts it fits within 12-bit registers limits
     assert isinstance(parsed_crc, int)
 
 

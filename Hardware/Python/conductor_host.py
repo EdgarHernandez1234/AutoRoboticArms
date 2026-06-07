@@ -6,7 +6,7 @@ import time
 portPath = "/dev/ttyACM0"  # Update to match actual serial port path
 
 class AutoRoboticArmConductor:
-    def __init__(self, port, baudrate=115200, l1_length_cm=10.0, l2_length_cm=10.0):
+    def __init__(self, port=portPath, baudrate=115200, l1_length_cm=10.0, l2_length_cm=10.0):
         """Initializes the Host Driver for a Single 3-Axis Robotic Arm."""
         # Kinematic Linkage Lengths (Update to match your PVC cuts)
         self.L1 = l1_length_cm
