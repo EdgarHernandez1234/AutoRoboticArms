@@ -2,7 +2,7 @@ import serial
 import struct
 import math
 import time
-
+# Sprint 1 Complete: Host Driver with Inverse Kinematics, CRC8, and Binary Framing for 3-Axis Robotic Arm
 portPath = "/dev/ttyACM0"  # Update to match actual serial port path
 
 class AutoRoboticArmConductor:
