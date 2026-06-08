@@ -21,7 +21,13 @@ Here will be focusing on the embedded systems aspects of my Project
 - Implementing a 2 byte binary framing for a 3-axis robotic arm for now (The second arm will come later)
 - Updating my project architecture to reflect this on my first sprint for this hardware Layer 
 
-### Sprint 2: Shifting Left and writing my tests early
-- Using pytest to write a test harness
-- Working on Boundary Value Analysis and spatial fuzzing
-- Added Safety operating bounds on arm to not overextend and damage arm
+### Sprint 2: Shifting Left and writing my Unit tests early
+- Using pytest to write a test harness in a isolated python environment. Requirements.txt have the versions of python libraries I am currently using for this sprint
+- pytest.ini is responsible for Manifest Calibration which makes a filepath that leads to the unit tests while keeping other files unaffected
+- Added conductor.serial_connection= reset_mock() which makes sure each unit test goes through a clean run
+-  Added Safety operating bounds min and max on arm to not arm
+- Working on Boundary Value Analysis which now has Epsilon-Flanking Fuzzing unit tests which include very small numbers that barely go over or under the robotic arm safety limits
+- Added a clamped edge frame when the robotic arm is in manual mode. It handles the arm from going over or under its safety limits. Updated the previous manual mode exception unit test to calculate clamped ticks
+- Added Telementary Log Throttling which defends against Denial of Service exploits but keeps precise vector forsenics for seeing what the bad ai/person wanted to do. Also a unit test that reflects this
+
+### Sprint 3: Bare Metal C++
