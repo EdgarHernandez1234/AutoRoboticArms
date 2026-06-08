@@ -24,3 +24,4 @@ Here will be focusing on the embedded systems aspects of my Project
 ### Sprint 2: Shifting Left and writing my tests early
 - Using pytest to write a test harness
 - Working on Boundary Value Analysis and spatial fuzzing
+- Added Safety operating bounds on arm to not overextend and damage arm
