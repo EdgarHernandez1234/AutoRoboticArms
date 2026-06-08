@@ -5,8 +5,12 @@ import time
 # Sprint 1 Complete: Host Driver with Inverse Kinematics, CRC8, and Binary Framing for 3-Axis Robotic Arm
 portPath = "/dev/ttyACM0"  # Update to match actual serial port path
 
+class WorkspaceEnvelopeViolation(Exception):
+    """Raised when a commanded coordinate breaches the safe dual-horizon physical cushions."""
+    pass
+
 class AutoRoboticArmConductor:
-    def __init__(self, port=portPath, baudrate=115200, l1_length_cm=10.0, l2_length_cm=10.0):
+    def __init__(self, port=portPath, baudrate=115200, l1_length_cm=10.0, l2_length_cm=10.0, safety_mode=True):
         """Initializes the Host Driver for a Single 3-Axis Robotic Arm."""
         # Kinematic Linkage Lengths (Update to match your PVC cuts)
         self.L1 = l1_length_cm
@@ -18,6 +22,12 @@ class AutoRoboticArmConductor:
         # Synchronization Headers
         self.SYNC_1 = 0x55
         self.SYNC_2 = 0xAA
+
+        # Operational Safety Flag: 
+        # True = Strict AI/Downstream Zero-Trust Mode (Throws Hard Exceptions)
+        # False = Manual Overrides / Engineering Calibrations Mode (Logs Warnings but Continues)
+        self.safety_mode_enabled = safety_mode
+
         # Attempt to open hardware serial; fallback to Mock mode if cable is disconnected
         try:
             self.serial_connection = serial.Serial(port, baudrate, timeout=1)
@@ -52,8 +62,14 @@ class AutoRoboticArmConductor:
             """
             # 1. Execute Spatial Safety Gate (Kept completely unchanged!)
             if not self.verify_workspace_envelope(x, y, z):
-                return None  
-                
+                # If strict safety mode is enabled, pull the emergency brake!
+                if self.safety_mode_enabled:
+                    raise WorkspaceEnvelopeViolation(f"AI/Downstream Target Input ({x}, {y}, {z}) blocked by safety firewall.")
+                else:
+                    # If in Manual/Engineering mode, bypass the crash block, log a heavy alert, and return None
+                    print(f"[MANUAL OVERRIDE] Warning: Coordinate ({x}, {y}, {z}) is out of bounds! Bypassing packet generation safely.")
+                    return None
+
             # 2. Inverse Kinematics Trigonometry (Your math logic here)
             base_angle = math.degrees(math.atan2(y, x))
             # ... (Shoulder and Elbow calculations remain the same)
@@ -169,7 +185,7 @@ class AutoRoboticArmConductor:
         # Brings safe operating boundary down from 22.0cm to 21.5cm
         safe_operating_max = max_reach - 0.5
         
-        # Brings safe operating boundary down from 22.0cm to 21.5cm
+        # Brings safe operating boundary down from 2 cm to 2.5cm
         safe_operating_min = min_reach + 0.5
         
         # Logging structural diagnostic evaluation to host console
@@ -220,7 +236,7 @@ if __name__ == "__main__":
     print("--- AutoRoboticArms Host Conductor Initialization ---")
     
     # Instantiate the host driver
-    arm = AutoRoboticArmConductor(port=portPath, baudrate=115200, l1_length_cm=10.0, l2_length_cm=10.0)
+    arm = AutoRoboticArmConductor(port=portPath, baudrate=115200, l1_length_cm=10.0, l2_length_cm=10.0, safety_mode=True)
     
     # Test 1: Valid Nominal Reach
     print("\n[Test 1] Nominal Reach Check (10, 10, 5)")
