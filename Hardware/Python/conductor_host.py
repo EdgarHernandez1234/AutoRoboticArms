@@ -58,18 +58,37 @@ class AutoRoboticArmConductor:
     
     def calculate_ik(self, x, y, z):
             """
-            Translates target Cartesian coordinates to 12-Bit Servo Register Ticks.
+            ranslates target Cartesian coordinates to 12-Bit Servo Register Ticks.
+            Natively clamps out-of-bounds inputs to the edge vector if safety mode is disabled.
             """
+            target_distance = math.sqrt(x**2 + y**2 + z**2)
+            absolute_max_reach = self.L1 + self.L2
+            absolute_min_reach = abs(self.L1 - self.L2)
+            
+            safe_operating_max = absolute_max_reach - 0.5  # 21.5cm
+            safe_operating_min = absolute_min_reach + 0.5  # 2.5cm
             # 1. Execute Spatial Safety Gate (Kept completely unchanged!)
             if not self.verify_workspace_envelope(x, y, z):
-                # If strict safety mode is enabled, pull the emergency brake!
+            # If strict safety mode is enabled, pull the emergency brake!
                 if self.safety_mode_enabled:
                     raise WorkspaceEnvelopeViolation(f"AI/Downstream Target Input ({x}, {y}, {z}) blocked by safety firewall.")
+                
                 else:
-                    # If in Manual/Engineering mode, bypass the crash block, log a heavy alert, and return None
-                    print(f"[MANUAL OVERRIDE] Warning: Coordinate ({x}, {y}, {z}) is out of bounds! Bypassing packet generation safely.")
-                    return None
-
+                    print(f"[MANUAL OVERRIDE] Warning: Coordinate ({x}, {y}, {z}) out of bounds. Calculating Clamped Edge Frame...")
+                    if target_distance == 0:
+                        return None # Avoid division by zero at absolute origin
+                    
+                    # Vector scaling: Bring the coordinate precisely to the breached horizon
+                    if target_distance > safe_operating_max:
+                        scale_factor = safe_operating_max / target_distance
+                    elif target_distance < safe_operating_min:
+                        scale_factor = safe_operating_min / target_distance
+                        
+                    x = x * scale_factor
+                    y = y * scale_factor
+                    z = z * scale_factor
+                    print(f"[MANUAL CLAMP] Vector dynamically shifted to safe edge: ({x:.2f}, {y:.2f}, {z:.2f})")
+            
             # 2. Inverse Kinematics Trigonometry (Your math logic here)
             base_angle = math.degrees(math.atan2(y, x))
             # ... (Shoulder and Elbow calculations remain the same)
@@ -79,6 +98,7 @@ class AutoRoboticArmConductor:
             
             # Elbow Angle using Law of Cosines
             cos_elbow = (r**2 + z**2 - self.L1**2 - self.L2**2) / (2 * self.L1 * self.L2)
+            
             # Clamp cos_elbow to handle microscopic floating point edge-cases near -1.0 or 1.0
             cos_elbow = max(-1.0, min(1.0, cos_elbow))
             elbow_angle = math.degrees(math.acos(cos_elbow))

@@ -213,13 +213,20 @@ def test_dirty_transport_truncation_resilience(conductor):
     
     print("[MOCK FUZZ] Fragment injected safely. Target Sentinel watchdog tracking initiated.")
 
-def test_manual_mode_bypasses_exception_throw(conductor):
-    """Verifies that dropping the safety_mode flag silences hard exceptions and logs clean rejections."""
+def test_manual_mode_calculates_clamped_edge_ticks(conductor):
+    """Verifies that dropping the safety mode flag scales the coordinate and returns valid edge ticks."""
     # 1. Force the driver into Manual Configuration Mode
     conductor.safety_mode_enabled = False
     
-    # 2. Assert that feeding an impossible coordinate NO LONGER crashes the runner thread
-    # It will print the manual warning alert and return cleanly as a safe None object pass
-    ik_output = conductor.calculate_ik(100.0, 100.0, 100.0)
+    # 2. Request a coordinate drastically outside our 22.0cm maximum physical capability
+    # Instead of raising an exception or returning None, it must return scaled ticks for 21.5cm reach!
+    edge_ticks = conductor.calculate_ik(30.0, 30.0, 0.0)
     
-    assert ik_output is None
+    assert edge_ticks is not None
+    base_t, shoulder_t, elbow_t = edge_ticks
+    
+    # Assert that the output values represent legal 12-bit hardware register bounds
+    assert isinstance(base_t, int)
+    assert 150 <= base_t <= 600
+    assert 150 <= shoulder_t <= 600
+    assert 150 <= elbow_t <= 600
