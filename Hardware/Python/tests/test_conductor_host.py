@@ -230,3 +230,22 @@ def test_manual_mode_calculates_clamped_edge_ticks(conductor):
     assert 150 <= base_t <= 600
     assert 150 <= shoulder_t <= 600
     assert 150 <= elbow_t <= 600
+
+def test_log_throttling_records_precise_forensics(conductor, capsys):
+    """Simulates an adversarial injection flood and asserts that exact coordinate forensics are recorded."""
+    conductor.safety_mode_enabled = False
+    
+    # Inject 150 consecutive malicious hyper-extended coordinate targets
+    for _ in range(150):
+        conductor.calculate_ik(50.0, 50.0, 50.0)
+        
+    captured = capsys.readouterr()
+    
+    # Assert Step 1: Counter tracked all 150 attempts perfectly
+    assert conductor.violation_counter == 150
+    
+    # Assert Step 2: The system printed exactly 2 throttled alerts (on loops 1 and 101)
+    assert captured.out.count("[ALERT] OUTER BOUNDARY VIOLATION") == 2
+    
+    # Assert Step 3: Verify the forensic vector log recorded the malicious input coordinates accurately
+    assert "Forensic Telemetry Data -> Target: (50.00, 50.00, 50.00)" in captured.out

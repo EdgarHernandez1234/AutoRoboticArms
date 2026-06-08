@@ -28,6 +28,11 @@ class AutoRoboticArmConductor:
         # False = Manual Overrides / Engineering Calibrations Mode (Logs Warnings but Continues)
         self.safety_mode_enabled = safety_mode
 
+        # --- SECURITY LOG THROTTLER REGISTERS ---
+        self.violation_counter = 0
+        # Only print alert once every 100 drops
+        self.LOG_THROTTLE_THRESHOLD = 100  
+
         # Attempt to open hardware serial; fallback to Mock mode if cable is disconnected
         try:
             self.serial_connection = serial.Serial(port, baudrate, timeout=1)
@@ -211,15 +216,25 @@ class AutoRoboticArmConductor:
         # Logging structural diagnostic evaluation to host console
         # print(f"[DIAG] Target Distance: {target_distance:.2cm} | Bounds: [{min_reach}, {max_reach}]")
 
-        # Evaluate coordinate alignment targets against spatial thresholds
+        # Check for boundary anomalies
+        
+        # Step 1: Detect Symmetrical Spatial Violations
         if target_distance > safe_operating_max:
-            print(f"[ERR] SPATIAL BOUNDARY VIOLATION: Target ({x}, {y}, {z}) is outside maximum reach envelope ({target_distance:.2f}cm > {max_reach:.1f}cm).")
-            return False
-            
+            self.violation_counter += 1
+            # Rate-limiting evaluate trigger gate: Captures the precise vector fingerprint!
+            if self.violation_counter % self.LOG_THROTTLE_THRESHOLD == 1:
+                print(f"[ALERT] OUTER BOUNDARY VIOLATION. Consecutive Anomalies: {self.violation_counter}")
+                print(f"        Forensic Telemetry Data -> Target: ({x:.2f}, {y:.2f}, {z:.2f}) | Distance: {target_distance:.2f}cm (Max Limit: {safe_operating_max}cm)")
+            return False     
+           
         if target_distance < safe_operating_min:
-            print(f"[ERR] SPATIAL BOUNDARY VIOLATION: Target ({x}, {y}, {z}) drops inside unsafe internal crash envelope ({target_distance:.2f}cm < {min_reach:.1f}cm).")
+            self.violation_counter += 1
+            # Rate-limiting evaluate trigger gate: Captures the precise vector fingerprint!
+            if self.violation_counter % self.LOG_THROTTLE_THRESHOLD == 1:
+                print(f"[ALERT] INNER BOUNDARY VIOLATION. Consecutive Anomalies: {self.violation_counter}")
+                print(f"        Forensic Telemetry Data -> Target: ({x:.2f}, {y:.2f}, {z:.2f}) | Distance: {target_distance:.2f}cm (Min Limit: {safe_operating_min}cm)")
             return False
-            
+        
         return True
     
     def move_to_target(self, x, y, z):
