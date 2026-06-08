@@ -29,5 +29,6 @@ Here will be focusing on the embedded systems aspects of my Project
 - Working on Boundary Value Analysis which now has Epsilon-Flanking Fuzzing unit tests which include very small numbers that barely go over or under the robotic arm safety limits
 - Added a clamped edge frame when the robotic arm is in manual mode. It handles the arm from going over or under its safety limits. Updated the previous manual mode exception unit test to calculate clamped ticks
 - Added Telementary Log Throttling which defends against Denial of Service exploits but keeps precise vector forsenics for seeing what the bad ai/person wanted to do. Also a unit test that reflects this
+- Added an custom exception which the AI on the software layer is able to reorginize its planned path. Will be expanded in the Software Layer
 
 ### Sprint 3: Bare Metal C++
