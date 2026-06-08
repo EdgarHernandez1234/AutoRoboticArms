@@ -2,7 +2,7 @@
 
 ## Refined Idea: Two simply made robotic arms being able to function properly with an ai being able to control them from within my homelab. This Project is meant to expand my knowledge on Embedded Hardware, Software, and Networking. Also Robotics is cool.
 
-## Current Goal For the week: Focusing on the Hardware layer first
+## Current Goal For the week: Focusing on the Hardware layer(Sprint 3)
 
 Starting May 16 2026
 
@@ -16,3 +16,4 @@ June 2026
 - Organized my folder structure and separated it into the three layers: Created a readme for each folder
 - Currently focusing on working on the Hardware Folder
 - Switched from unittest to using Pytest for my unit tests
+- Added my updates for Sprint 1 and 2 for the Hardware Layer. My progress for the Hardware Layer will be in the Hardware Folder in the README.md
