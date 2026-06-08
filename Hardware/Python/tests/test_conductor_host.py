@@ -112,6 +112,7 @@ def test_serial_transmission_payload(conductor):
     (0.0, 0.0, 0.0, False),     # Crash Core Enclosure Overflow: Inside internal self-collision zone
     (15.1, 15.1, 0.0, True),    # Boundary Check: 21.35cm reach value (Inside our 21.5cm clearance envelope)
     (15.3, 15.3, 0.0, False),   # Boundary Check: 21.63cm reach value (Dropped gracefully by safety margin)
+    (2.0, 1.0, 0.0, False),      # Boundary Check Min: 2.23cm reach value (Dropped by inner cushion!)
 ])
 def test_spatial_safety_interlock_boundaries(conductor, x, y, z, expected_safety_state):
     """Verifies that our Workspace Filter intercepts and drops out-of-bounds coordinates before math processing."""
