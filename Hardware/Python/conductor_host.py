@@ -159,19 +159,28 @@ class AutoRoboticArmConductor:
         
         # Define lower clearance constraint (Prevents arm from self-colliding with base mechanics)
         min_reach = abs(self.L1 - self.L2)
+        
         # Handle zero clearance fallback if links are completely identical lengths
         if min_reach == 0:
             min_reach = 2.0  # Safe explicit baseline clearance boundary (cm)
             
+        # Enforce our defensive Singularity Mitigation Margin (0.5cm clearance)
+       
+        # Brings safe operating boundary down from 22.0cm to 21.5cm
+        safe_operating_max = max_reach - 0.5
+        
+        # Brings safe operating boundary down from 22.0cm to 21.5cm
+        safe_operating_min = min_reach + 0.5
+        
         # Logging structural diagnostic evaluation to host console
         # print(f"[DIAG] Target Distance: {target_distance:.2cm} | Bounds: [{min_reach}, {max_reach}]")
 
         # Evaluate coordinate alignment targets against spatial thresholds
-        if target_distance > max_reach:
+        if target_distance > safe_operating_max:
             print(f"[ERR] SPATIAL BOUNDARY VIOLATION: Target ({x}, {y}, {z}) is outside maximum reach envelope ({target_distance:.2f}cm > {max_reach:.1f}cm).")
             return False
             
-        if target_distance < min_reach:
+        if target_distance < safe_operating_min:
             print(f"[ERR] SPATIAL BOUNDARY VIOLATION: Target ({x}, {y}, {z}) drops inside unsafe internal crash envelope ({target_distance:.2f}cm < {min_reach:.1f}cm).")
             return False
             
