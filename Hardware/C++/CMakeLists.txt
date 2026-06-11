@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.15)
 project(ConductorReceiver CXX C)
+# Enforce generation of compile_commands.json for VS Code IntelliSense tracking
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_CXX_STANDARD 17)
 

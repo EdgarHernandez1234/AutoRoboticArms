@@ -67,44 +67,63 @@ void process_buffered_frames() {
 
 void parse_incoming_frame_window() {
     uint8_t running_crc = 0;
-    
-    // Step 1: Natively step through the given 5-byte payload window
     for (uint8_t i = 0; i < 5; i++) {
-        // Handle circular index wrap-around tracking via modular arithmetic
-        uint8_t buffer_index = (tail + i) % BUFFER_SIZE;
-        uint8_t current_byte = ringBuffer[buffer_index];
-        
-        // Fast table-indexed polynomial execution (1 CPU clock cycle operation)
-        running_crc = crc8_table[running_crc ^ current_byte];
+        running_crc = crc8_table[running_crc ^ ringBuffer[(tail + i) % BUFFER_SIZE]];
     }
     
-    // Step 2: Locate the packet's transmitted checksum address (BYTE 5)
-    uint8_t expected_checksum_index = (tail + 5) % BUFFER_SIZE;
-    uint8_t packet_checksum = ringBuffer[expected_checksum_index];
+    uint8_t packet_checksum = ringBuffer[(tail + 5) % BUFFER_SIZE];
     
-    // Step 3: Execute Security Integrity Validation Check
     if (running_crc == packet_checksum) {
-        // SUCCESS: Frame verified authentic. Extract raw binary motor parameters.
+        // 1. Natively extract verified motor parameter primitives
         uint8_t base_target  = ringBuffer[(tail + 2) % BUFFER_SIZE];
         uint8_t shldr_target = ringBuffer[(tail + 3) % BUFFER_SIZE];
         uint8_t elbow_target = ringBuffer[(tail + 4) % BUFFER_SIZE];
         
-        // Latch time-stamp ledger to satisfy our 300ms watchdog interlock loop
+        // (In Sprint 8, these targets will map to physical PCA9685 I2C register duty cycles)
+        (void)base_target; (void)shldr_target; (void)elbow_target; 
+
+        // 2. Latch time-stamp ledger for the 300ms watchdog interlock loop
         cli();
         lastValidPacketTime = timer_millis;
         sei();
         
-        // ... (Update servo registers with valid data here) ...
-        
-        // Securely advance the circular queue tail pointer by the full 6-byte block
+        // 3. Clear all 6 bytes of the processed frame from the queue bounds
         tail = (tail + 6) % BUFFER_SIZE;
-    } 
-    else {
-        // CORRUPTION HOOK DETECTED: Data has been tampered with or bit-flipped mid-transit!
-        // Immediately invoke a hard transition to your requested Safe Hold Mode state!
+
+        // 4. 🔄 BI-DIRECTIONAL ACKNOWLEDGEMENT TRIGGER
+        // Forcefully drop the ASCII 'K' character byte onto the copper Tx track lines.
+        // This signals to Option B that the buffer is clear and ready for the next frame.
+#ifndef TESTING_ON_HOST
+        while (!(UCSR0A & (1 << UDRE0))); // Wait for empty hardware transmit buffer flag
+        UDR0 = 'K';                       // Spill token onto the physical wire
+#endif
+    } else {
         handle_system_fault(SYSTEM_FAULT_CHECKSUM);
-        
-        // Advance tail by 1 to clear out the current window block and flush line state noise
         tail = (tail + 1) % BUFFER_SIZE;
+    }
+}
+
+void verify_isolated_recovery_handshake() {
+    // Our secure 6-byte Out-of-Band Recovery Signature
+    const uint8_t secure_key[6] = {0xAA, 0x55, 0xDE, 0xAD, 0xBE, 0xEF};
+    // Evaluate if the ring buffer contains enough data to check for the key window
+    while (((head - tail + BUFFER_SIZE) % BUFFER_SIZE) >= 6) {
+        bool key_matched = true;
+        for (uint8_t i = 0; i < 6; i++) {
+            if (ringBuffer[(tail + i) % BUFFER_SIZE] != secure_key[i]) {
+                key_matched = false;
+                break;
+            }
+        }
+        if (key_matched) {
+            currentSystemState = SYSTEM_NOMINAL;
+            tail = (tail + 6) % BUFFER_SIZE;
+            cli();
+            lastValidPacketTime = timer_millis;
+            sei();
+            return;
+        } else {
+            tail = (tail + 1) % BUFFER_SIZE;
+        }
     }
 }

@@ -1,57 +1,52 @@
-#define __AVR_ATmega328P__
-#include <avr/io.h>
-#include <avr/interrupt.h>
-#include "../include/ring_buffer.h"
+#include "ring_buffer.h"
+
+#ifdef TESTING_ON_HOST
+volatile uint8_t UBRR0H = 0; volatile uint8_t UBRR0L = 0;
+volatile uint8_t UCSR0A = 0; volatile uint8_t UCSR0B = 0;
+volatile uint8_t UCSR0C = 0; volatile uint8_t UDR0 = 0;
+#endif
 
 SystemState currentSystemState = SYSTEM_INIT;
 unsigned long lastValidPacketTime = 0;
 const unsigned long WATCHDOG_TIMEOUT_MS = 300;
-
 // Primitive software millis tracking register for standard AVR chips
 volatile unsigned long timer_millis = 0;
 
+#ifndef TESTING_ON_HOST
 // Timer0 Overflow Interrupt Service Routine (Fires approx every 1ms)
-ISR(TIMER0_OVF_vect) {
-    timer_millis++;
-}
-
-// Hardware UART Receive Complete Interrupt Service Routine
-ISR(USART_RX_vect) {
-    uint8_t incomingByte = UDR0; // Read directly from the hardware serial data register
-    push_serial_byte(incomingByte);
-}
+ISR(TIMER0_OVF_vect) { timer_millis++; }
+// Hardware UART Receive Complete Interrupt Service Routine and reads directly from the data register to push into our ring buffer
+ISR(USART_RX_vect) { push_serial_byte(UDR0); }
+#endif
 
 void init_avr_registers() {
+#ifndef TESTING_ON_HOST
     // --- 1. CONFIGURE NATIVE HARDWARE UART (115200 Baud @ 16MHz Clock) ---
     uint16_t ubrr_value = 16; // Calculated via data-sheet rules for 115200 double-speed
-    UBRR0H = (uint8_t)(ubrr_value >> 8);
-    UBRR0L = (uint8_t)ubrr_value;
     
-    UCSR0A |= (1 << U2X0); // Enable double-speed transmission mode
-    UCSR0B |= (1 << RXCIE0) | (1 << RXEN0) | (1 << TXEN0); // Enable RX Interrupt, RX, and TX lines
-    UCSR0C |= (1 << UCSZ01) | (1 << UCSZ00); // Set frame format: 8 Data Bits, 1 Stop Bit (8N1)
+    UBRR0H = (uint8_t)(ubrr_value >> 8);
+    UBRR0L = (uint8_t)ubrr_value; // Set baud rate registers
+    UCSR0A |= (1 << U2X0); // UCSR0A Enable double-speed transmission mode
+    UCSR0B |= (1 << RXCIE0) | (1 << RXEN0) | (1 << TXEN0);   // UCSR0B Enable RX Interrupt, RX, and TX lines
+    UCSR0C |= (1 << UCSZ01) | (1 << UCSZ00); // UCSR0C Set frame format: 8 Data Bits, 1 Stop Bit (8N1)
 
-    // --- 2. DETERMINISTIC HARDWARE BOOT-FLUSH ---
+        // --- 2. DETERMINISTIC HARDWARE BOOT-FLUSH ---
     // Natively drain the ATmega328P's internal hardware internal FIFO pipeline
     // to destroy any stray electrical noise or leftovers from a previous host run
     uint8_t dummy_flush = 0;
-    while (UCSR0A & (1 << RXC0)) {
-        dummy_flush = UDR0; // Repetitively read the data register to empty the silicon queue
-        (void)dummy_flush;  // Prevent compiler from optimization-stripping this out
-    }
-
+    // Repetitively read the data register to empty the silicon queue and And Prevent compiler from optimization-stripping this out
+    while (UCSR0A & (1 << RXC0)) { dummy_flush = UDR0; (void)dummy_flush; }
+#endif
     // Force our software Static Ring Buffer pointers back to absolute zero baseline
-    head = 0;
-    tail = 0;
-    for (uint8_t i = 0; i < BUFFER_SIZE; i++) {
-        ringBuffer[i] = 0; // Completely sanitize memory array space
-    }
-
+    head = 0; tail = 0;
+    for (uint8_t i = 0; i < BUFFER_SIZE; i++) { ringBuffer[i] = 0; // Completely sanitize memory array space 
+        }
+#ifndef TESTING_ON_HOST
     // --- 3. CONFIGURE TIMER0 FOR MILLIS TRACKING ---
-    TCCR0B |= (1 << CS01) | (1 << CS00); // Set clock prescaler to 64
-    TIMSK0 |= (1 << TOIE0);              // Enable Timer0 Overflow Interrupt
-    
+    TCCR0B |= (1 << CS01) | (1 << CS00);  // Set clock prescaler to 64
+    TIMSK0 |= (1 << TOIE0);   // Enable Timer0 Overflow Interrupt
     sei(); // Enable global interrupts safely now that memory is sanitized
+#endif
 }
 
 void verify_watchdog_interlock() {
@@ -80,7 +75,10 @@ void handle_system_fault(SystemState faultType) {
         // 🔒 HARD PROTOCOL STATE ISOLATION ENGINE
         // Completely hijack the main loop runner. Standard parsing is disabled.
         while (currentSystemState == SYSTEM_FAULT_CHECKSUM) {
-            
+           
+            #ifdef TESTING_ON_HOST
+            return; // Soft-break blocking trap during host verification runs
+            #endif
             // Step 1: Keep pushing background incoming bytes over the UART lines into the buffer
             // Our direct hardware interrupt ISR(USART_RX_vect) continues handling this in isolation.
             
@@ -133,12 +131,15 @@ void verify_isolated_recovery_handshake() {
 }
 
 void transmit_uart_string(const char* str) {
+    #ifndef TESTING_ON_HOST
     while (*str) {
         while (!(UCSR0A & (1 << UDRE0))); // Wait for empty transmit buffer register flag
         UDR0 = *str++;                     // Drop character byte onto the copper transmit line
     }
+    #endif
 }
 
+#ifndef TESTING_ON_HOST
 int main(void) {
     init_avr_registers();
     currentSystemState = SYSTEM_NOMINAL;
@@ -154,3 +155,7 @@ int main(void) {
     
     return 0; // Standard compiler mapping (Never reached on bare metal)
 }
+#endif
+
+
+// check line by line
