@@ -46,3 +46,4 @@ Here will be focusing on the embedded systems aspects of my Project
 
 ### Sprint 4: Robotic Arm assembly
 - Researching possible materials to make robotic arm without a 3D printer for first prototype
+- 
