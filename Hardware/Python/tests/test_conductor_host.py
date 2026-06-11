@@ -249,3 +249,23 @@ def test_log_throttling_records_precise_forensics(conductor, capsys):
     
     # Assert Step 3: Verify the forensic vector log recorded the malicious input coordinates accurately
     assert "Forensic Telemetry Data -> Target: (50.00, 50.00, 50.00)" in captured.out
+
+def test_automated_handshake_recovery_loop(simulated_microcontroller):
+    """Verifies that the microcontroller rejects bad frames, locks down, and self-heals upon secure key ingress."""
+    # 1. Simulate sending a corrupted payload frame to trip the fault register
+    simulated_microcontroller.inject_serial_bytes(b'\x55\xAA\x90\x45\x90\xFF') # Bad Checksum
+    simulated_microcontroller.process_loops()
+    assert simulated_microcontroller.current_state == "SYSTEM_FAULT_CHECKSUM"
+    
+    # 2. Verify that spamming regular kinematic target data lines is completely ignored
+    simulated_microcontroller.inject_serial_bytes(b'\x55\xAA\x45\x45\x45\x12') 
+    simulated_microcontroller.process_loops()
+    assert simulated_microcontroller.current_state == "SYSTEM_FAULT_CHECKSUM" # Remains tightly locked
+    
+    # 3. Stream the explicit 6-byte secure out-of-band recovery handshake token string
+    secure_clear_token = b'\xAA\x55\xDE\xAD\xBE\xEF'
+    simulated_microcontroller.inject_serial_bytes(secure_clear_token)
+    simulated_microcontroller.process_loops()
+    
+    # 4. Assert that the hardware successfully recovered back to Nominal production tracks!
+    assert simulated_microcontroller.current_state == "SYSTEM_NOMINAL"
