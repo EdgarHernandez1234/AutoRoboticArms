@@ -6,12 +6,13 @@ Here will be focusing on the embedded systems aspects of my Project
 
 ### Hardware:
 - Arduino Uno R3
-- PVC pipes
-- .
+- Raspberry Pi 4 Model B
+- Ubuntu Server LTS serial ports
 
 ### Software:
 - Pytest
 - Python venv
+- Cmake
 
 ## Sprints
 
@@ -31,4 +32,17 @@ Here will be focusing on the embedded systems aspects of my Project
 - Added Telementary Log Throttling which defends against Denial of Service exploits but keeps precise vector forsenics for seeing what the bad ai/person wanted to do. Also a unit test that reflects this
 - Added an custom exception which the AI on the software layer is able to reorginize its planned path. Will be expanded in the Software Layer
 
-### Sprint 3: Bare Metal C++
+### Sprint 3: Bare Metal C++:
+- Using CMake to make a dual-target project architecture
+-  Made main and ring buffer C++ files to keep memory separate from execution states. 
+- Implemented automated path configs (compile_commands.json) to include custom directories to VSCode to avoid red squiggly lines
+- Made a Pre-Processor Sheild Blueprint which isolates physical hardware dependencies from host simulation code
+- Main control system loop and testing frame work run independently. So testing code can be removed from main code to keep microcontroller have its minimal resources
+- Implemented fixed 32-byte memory ring buffer with a CRC8 CCCITT Table to prevent memory overflow exploits. So no rogue commands for the arm 
+- Using an old laptop that's running a headless Ubuntu Server LTS with Docker. Also will use Docker Bulid-Time Secret Injection to not leak hardware key in github repo but keep no overhead in binary trasfers to microchip tracking lines
+- Using a Bi-Directional Handshake Protocol which means no more data crowding and Queue Starvation. So the Python app won't go over what the physical servo can handle and the arduino microcontroller will write a byte token to show it is completely lined up.
+- Made a test register stub for the register emulator
+- Made Unit tests which are in tests
+
+### Sprint 4: Robotic Arm assembly
+- Researching possible materials to make robotic arm without a 3D printer for first prototype
