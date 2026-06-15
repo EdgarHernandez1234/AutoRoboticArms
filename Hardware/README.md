@@ -2,12 +2,16 @@
 
 Here will be focusing on the embedded systems aspects of my Project
 
+## MVP
+I want a robotic arm with security measures put into place that can work by itself or be a part of this major project
+
 ## Tech Stack
 
 ### Hardware:
 - Arduino Uno R3
 - Raspberry Pi 4 Model B
 - Ubuntu Server LTS serial ports
+- USB-A to USB-B cord
 
 ### Software:
 - Pytest
@@ -46,4 +50,4 @@ Here will be focusing on the embedded systems aspects of my Project
 
 ### Sprint 4: Robotic Arm assembly
 - Researching possible materials to make robotic arm without a 3D printer for first prototype
-- 
+- Hardware tech stack will be updated once I have my materials ready. Meanwhile, will work on software layer
