@@ -1,6 +1,6 @@
 # Hardware Layer
 
-Here will be focusing on the embedded systems aspects of my Project
+This layer will focus on the embedded systems, cyber-physical, and system engineering to ensure the robotic arms I make do not burn my place down and are secure. I plan to focus on one arm at a time to simplify the wiring and other physical aspects of this layer. However, while this hardware layer will be in this mega project, it can also be a standalone project too because robotics is cool.
 
 ## MVP
 I want a robotic arm with security measures put into place that can work by itself or be a part of this major project
