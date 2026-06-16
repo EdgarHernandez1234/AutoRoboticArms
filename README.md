@@ -19,4 +19,6 @@ June 2026
 - Added my updates for Sprint 1 and 2 for the Hardware Layer. My progress for the Hardware Layer will be in the Hardware Folder in the README.md
 - Added my updates for Sprint 3 of the hardware layer and I will further document my progress once I finally get to creating the robotic arm 
 - Added small descriptions to each of my respective layers and changed the Network's layer's name to Cloud. Each layer can also be seen as 3 different projects for possibly use in my future projects or focus on a specific layer's knowledge
-- Will start the pre-flight checks before starting off my first software layer sprint
+- Will start the pre-flight checks before starting off my first software layer sprint. Also started pre-flight checks before starting off the first cloud layer sprint at a later time
+- Documented the list of terms I need to know for each of the three layers in order to strengthem them individually or to strengthen them as part of this mega project.
+- Decided to finish all the pre-flight checks for each layer to prevent making this project more complex than it needs to be and to actually make it exist first.
