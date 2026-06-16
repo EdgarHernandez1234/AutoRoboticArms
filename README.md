@@ -1,6 +1,6 @@
 # AutoRoboticArms
 
-## Refined Idea: Two simply made robotic arms being able to function properly with an ai being able to control them from within my homelab. This Project is meant to expand my knowledge on Embedded Hardware, Software, and Networking. Also Robotics is cool.
+## Refined Idea: Two simply made robotic arms being able to function properly with an ai being able to control them from within my homelab. This Project is meant to expand my knowledge on Embedded Hardware, Software, and Networking. Because interdisciplinary knowledge is cool
 
 ## Current Goal For the week: Getting the materials for Sprint 4 / Starting Software Layer Sprint 1
 
@@ -18,5 +18,5 @@ June 2026
 - Switched from unittest to using Pytest for my unit tests
 - Added my updates for Sprint 1 and 2 for the Hardware Layer. My progress for the Hardware Layer will be in the Hardware Folder in the README.md
 - Added my updates for Sprint 3 of the hardware layer and I will further document my progress once I finally get to creating the robotic arm 
-- Added small descriptions to each of my respective layers and changed the Network's layer's name to Cloud. Each layer can also be seen as 3 different projects because interdisciplinary work is cool
+- Added small descriptions to each of my respective layers and changed the Network's layer's name to Cloud. Each layer can also be seen as 3 different projects for possibly use in my future projects or focus on a specific layer's knowledge
 - Will start the pre-flight checks before starting off my first software layer sprint
