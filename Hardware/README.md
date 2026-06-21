@@ -51,3 +51,5 @@ I want a robotic arm with security measures put into place that can work by itse
 ### Sprint 4: Robotic Arm assembly
 - Researching possible materials to make robotic arm without a 3D printer for first prototype
 - Hardware tech stack will be updated once I have my materials ready. Meanwhile, will work on software layer
+- Returned to this layer to restructure my Hardware Layer architecture to stay modular while still eventually being connected to the software layer
+- Revisited my python folder and split the conductor_host and Inverse_kinematics for my Raspberry Pi
