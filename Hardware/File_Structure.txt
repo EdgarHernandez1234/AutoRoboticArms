@@ -9,13 +9,14 @@ AutoRoboticArms/
         ├── main.cpp                # Deterministic System State Engine Main Loop
         └── ring_buffer.cpp         # Sliding Pointer Realignment Implementations
 
-└── Python/
-    ├── __init__.py                 # 
-    ├── conductor_host.py           # CRC8 calculation and manual/auto mode
-    ├── inverse_kinematics.py       # Focuses soley on Inverse kinematics 
-    ├── pytest.ini                  # Tells pytest where the unit tests are
-    ├── requirements.txt            # The specific library versions used at this point
-    ├── tests/
-        └── __init__.py             #
-        └── test_conductor_host.py  # Has the unit tests from the first version now in a more embedded-systems friendly manor
-        └── test_inverse_kinematics.py # unit tests that exclusively tests for inverse_kinematics
+└── host_app/
+    └── src
+        ├── __init__.py                 # 
+        ├── conductor_host.py           # CRC8 calculation and manual/auto mode
+        ├── inverse_kinematics.py       # Focuses soley on Inverse kinematics 
+        ├── pytest.ini                  # Tells pytest where the unit tests are
+        ├── requirements.txt            # The specific library versions used at this point
+        ├── tests/
+            └── __init__.py             # 
+            └── test_conductor_host.py  # Has the unit tests from the first version now in a more embedded-systems friendly manor
+            └── test_inverse_kinematics.py # unit tests that exclusively tests for inverse_kinematics
