@@ -2,7 +2,7 @@
 
 ## Refined Idea: Two simply made robotic arms being able to function properly with an ai being able to control them from within my homelab. This Project is meant to expand my knowledge on Embedded Hardware, Software, and Networking. Because interdisciplinary knowledge is cool
 
-## Current Goal For the week: Getting the materials for Sprint 4 / Starting Software Layer Sprint 1
+## Current Goal For the week: Finalize hardware layer's file architecture this week
 
 Starting May 16 2026
 
