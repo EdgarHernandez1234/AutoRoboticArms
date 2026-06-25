@@ -1,10 +1,14 @@
+import sys
+import os
 import pytest
 from sqlmodel import SQLModel, Session, create_engine, select
 from pydantic import ValidationError
 from datetime import datetime
-
-# Import your actual schema blueprints from the host application
-from host_app.src.models import TelemetryIngressQueue, NodeConfiguration
+from sqlalchemy.exc import StatementError    
+# Import schema blueprints from the host application
+host_main = os.path.abspath(os.path.join(os.path.dirname(__file__), "../src"))
+sys.path.append(host_main)
+from database_manager import TelemetryIngressQueue, NodeConfiguration, log_telemetry_state
 
 # ---------------------------------------------------------
 # 1. THE IN-MEMORY TEST FIXTURE (The Sandbox)
@@ -52,22 +56,21 @@ def test_valid_telemetry_commit(session: Session):
 # ---------------------------------------------------------
 # 3. TEST CASE B: The Type-Coercion Attack (Validation Filter)
 # ---------------------------------------------------------
-def test_schema_rejects_corrupted_datatypes():
+def test_schema_rejects_corrupted_datatypes(session: Session):
     """
     Common Telemetry Bug: A sensor glitches and sends a string instead of a float.
     We assert that SQLModel acts as a strict firewall and blocks the creation.
     """
-    with pytest.raises(ValidationError):
+    with pytest.raises((StatementError, ValidationError)) as exc_info:
         # We intentionally pass the string "ERROR" into a float field
-        corrupted_log = TelemetryIngressQueue(
-            target_x="ERROR",  # <--- This should trigger the failure
-            target_y=5.0,
-            target_z=10.0,
-            base_angle=90,
-            shoulder_angle=45,
-            elbow_angle=135,
-            checksum_sent="FF"
+# STEP 1: The Trigger (Injecting the Poison Pill)
+        log_telemetry_state(
+            target_coords={"x": "MALFORMED_STRING", "y": 1.0, "z": 1.0}, # 'x' expects a float!
+            angles={"base": 90, "shoulder": 45, "elbow": 30},
+            status="NOMINAL",
+            checksum="FF"
         )
+        print(f"[TEST-ASSERT] Successfully caught schema rejection: {exc_info.type}")
 
 # ---------------------------------------------------------
 # 4. TEST CASE C: Configuration Uniqueness (Index Collision)

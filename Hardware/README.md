@@ -26,15 +26,21 @@ I want a robotic arm with security measures put into place that can work by itse
 - Implementing a 2 byte binary framing for a 3-axis robotic arm for now (The second arm will come later)
 - Updating my project architecture to reflect this on my first sprint for this hardware Layer 
 
-### Sprint 2: Shifting Left and writing my Unit tests early
+### Sprint 2: Shifting Left and writing my Unit Tests early
 - Using pytest to write a test harness in a isolated python environment. Requirements.txt have the versions of python libraries I am currently using for this sprint
 - pytest.ini is responsible for Manifest Calibration which makes a filepath that leads to the unit tests while keeping other files unaffected
 - Added conductor.serial_connection= reset_mock() which makes sure each unit test goes through a clean run
 -  Added Safety operating bounds min and max on arm to not arm
 - Working on Boundary Value Analysis which now has Epsilon-Flanking Fuzzing unit tests which include very small numbers that barely go over or under the robotic arm safety limits
 - Added a clamped edge frame when the robotic arm is in manual mode. It handles the arm from going over or under its safety limits. Updated the previous manual mode exception unit test to calculate clamped ticks
-- Added Telementary Log Throttling which defends against Denial of Service exploits but keeps precise vector forsenics for seeing what the bad ai/person wanted to do. Also a unit test that reflects this
-- Added an custom exception which the AI on the software layer is able to reorginize its planned path. Will be expanded in the Software Layer
+- Added Telemetry Log Throttling which defends against Denial of Service exploits but keeps precise vector forsenics for seeing what the bad ai/person wanted to do. Added a unit test that reflects this
+- Added an custom exception which the AI on the software layer is able to reorganize its planned path. Will be expanded in the Software Layer
+- Returned to this layer to restructure my Hardware Layer architecture to stay modular while still eventually being connected to the software layer
+- Revisited my python folder and split the conductor_host and Inverse_kinematics for my Raspberry Pi
+- Used the Linux device manager(udev) to configure what permission my Docker container has access to on my Raspberry Pi
+- Added a models file which makes an actual Sqlite database (Autorobot_telemetry) which logs telemetry data
+- Added database_manager which has a Prune watchdog that deletes the oldest telemetry data when it exceeds a certain number of entries
+- Added the respective unit tests for testing these new database files in conftest.py, test_conductor_host.py, and test_database_integrity.py
 
 ### Sprint 3: Bare Metal C++:
 - Using CMake to make a dual-target project architecture
@@ -51,5 +57,3 @@ I want a robotic arm with security measures put into place that can work by itse
 ### Sprint 4: Robotic Arm assembly
 - Researching possible materials to make robotic arm without a 3D printer for first prototype
 - Hardware tech stack will be updated once I have my materials ready. Meanwhile, will work on software layer
-- Returned to this layer to restructure my Hardware Layer architecture to stay modular while still eventually being connected to the software layer
-- Revisited my python folder and split the conductor_host and Inverse_kinematics for my Raspberry Pi

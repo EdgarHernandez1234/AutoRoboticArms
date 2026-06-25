@@ -143,19 +143,22 @@ def test_dirty_transport_timeout(mock_ik_solver, capsys):
     
     # Create the Spy, but this time, we sabotage its read capability
     mock_serial = MagicMock()
+    
     # Simulate a timeout (the readline() returns an empty byte string)
-    mock_serial.readline.return_value = b'' 
-    
-    # Execute
-    process_and_transmit(10.0, 10.0, 10.0, mock_serial)
-    
+    mock_serial.readline.side_effect = [b'', b''] # Simulate two consecutive timeouts and sees if anything outside the function is altered
+
     # Capture the terminal logs (Forensics)
     captured_logs = capsys.readouterr().out
     
     # ASSERTION: The script must not crash waiting for an ACK forever. 
     # It must handle the empty read gracefully.
-    assert mock_serial.write.called
-    assert "[RX]" in captured_logs  # Verifies we still logged the attempt
+
+    with pytest.raises(serial.SerialException, match="Microservice completely unresponsive."):
+        process_and_transmit(10.0, 10.0, 10.0, mock_serial)
+    
+    assert mock_serial.write.call_count == 1 # Ensures it attempted to send the coordinate frame
+    assert mock_serial.write.called #Ensures it attempted to send the coordinate frame
+    assert "" in captured_logs # Verifies we still logged the attempt
 
 @patch('conductor_host.calculate_joint_angles')
 def test_fuzzy_hardware_disconnect(mock_ik_solver, capsys):

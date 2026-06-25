@@ -11,7 +11,7 @@ from sqlmodel import SQLModel, Session, create_engine
 # ModuleNotFoundErrors when running pytest from the root of the workspace.
 host_main = os.path.abspath(os.path.join(os.path.dirname(__file__), "../src"))
 sys.path.append(host_main)
-
+import database_manager
 
 # ---------------------------------------------------------
 # 2. GLOBAL SYSTEM TEST FIXTURES
@@ -64,3 +64,12 @@ def db_session_fixture(test_engine):
         # THE CLEAN Shield: Force an atomic rollback to return theRAM 
         # database plane to a perfectly pristine, predictable state.
         session.rollback()
+
+@pytest.fixture(autouse=True)
+def patch_production_database_engine(test_engine, monkeypatch):
+    """
+    SECURITY INTERCEPT: Automatically forces the production database manager 
+    to route all writes into our secure, ephemeral disk-backed test engine 
+    for the duration of every test.
+    """
+    monkeypatch.setattr(database_manager, "engine", test_engine)
