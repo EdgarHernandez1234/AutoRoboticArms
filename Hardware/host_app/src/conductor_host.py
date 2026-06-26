@@ -5,9 +5,9 @@ import sys
 # 1. DECOUPLED ARCHITECTURAL IMPORT
 # We import our independent math module and its custom safety exception
 from inverse_kinematics import calculate_joint_angles, WorkspaceEnvelopeViolation
-from database_manager import log_telemetry_state
+from database_manager import log_telemetry_state, initialize_database
 # 2. HARDWARE CONFIGURATION
-TARGET_PORT = "/dev/ttyACM0"  # Update to 'COM3' if using Windows
+TARGET_PORT = "/dev/tty.usbmodem14101"  # Update to 'COM3' if using Windows or /dev/tty.usbmodem14101 for MacOS, ttyACM0 for Linux
 BAUD_RATE = 115200
 SERIAL_TIMEOUT = 0.5  # Strict 50ms timeout window to intercept hardware drops
 
@@ -116,6 +116,8 @@ def process_and_transmit(x: float, y: float, z: float, ser: serial.Serial) -> bo
 def main():
     print("=== AutoRoboticArms: Host Orchestrator Initialized ===")
     
+    initialize_database() # Ensure the telemetry database is ready for logging
+
     try:
         # Open the hardware data-link layer
         with serial.Serial(TARGET_PORT, BAUD_RATE, timeout=SERIAL_TIMEOUT) as ser:
