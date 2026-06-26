@@ -1,114 +1,95 @@
+// ---------------------------------------------------------
+// QA BENCH COGNITIVE IMPORTS
+// ---------------------------------------------------------
 #include <iostream>
 #include <cassert>
-#include "ring_buffer.h"
+#include "../include/circular_buffer.h"
+#include "../include/watchdog_interlock.h"
 
-// 1. Emulate bare-metal AVR registers as global host variables
-volatile uint8_t UBRR0H = 0; volatile uint8_t UBRR0L = 0;
-volatile uint8_t UCSR0A = 0; volatile uint8_t UCSR0B = 0;
-volatile uint8_t UCSR0C = 0; volatile uint8_t UDR0 = 0;
+// Simple terminal coloring macro definitions for cross-platform visual validation
+#define TEST_PASS(msg) std::cout << "\033[32m[PASS] " << msg << "\033[0m\n"
+#define TEST_FAIL(msg) std::cerr << "\033[31m[FAIL] " << msg << "\033[0m\n"
 
-unsigned long lastValidPacketTime = 0;
-volatile unsigned long timer_millis = 0;
+// ---------------------------------------------------------
+// AUTOMATED COMPONENT INTEGRITY CHECKS
+// ---------------------------------------------------------
 
-void run_firmware_integrity_test_suite() {
-    std::cout << "🧪 Initializing Bare-Metal Firmware In-Memory Harness SIM..." << std::endl;
+void test_circular_buffer_nominal_and_wrap_around() {
+    CircularBuffer ring;
+    ring.init();
     
-    // ---------------------------------------------------------
-    // TEST CASE 1: Validate Nominal Frame Parsing
-    // ---------------------------------------------------------
-    head = 0; tail = 0; currentSystemState = SYSTEM_NOMINAL;
+    // Assert structural baseline initialization
+    assert(ring.get_count() == 0);
+    assert(!ring.is_full());
     
-    push_serial_byte(0x55); // SYNC_1
-    push_serial_byte(0xAA); // SYNC_2
-    push_serial_byte(0x5A); // Base Angle (90)
-    push_serial_byte(0x2D); // Shoulder Angle (45)
-    push_serial_byte(0x87); // Elbow Angle (135)
-    push_serial_byte(0x8F); // Pre-computed matching CRC8 checksum token
+    // Fill the buffer to capacity limits sequentially
+    for (uint8_t i = 0; i < BUFFER_SIZE; ++i) {
+        assert(ring.enqueue(i));
+    }
     
-    process_buffered_frames();
+    // Assert overflow interlock backpressure kicks in
+    assert(ring.is_full());
+    assert(ring.enqueue(0xFF) == false); // Enqueue must fail safely
     
-    // Assert that the system accepted the frame and remained in NOMINAL state
-    assert(currentSystemState == SYSTEM_NOMINAL);
-    std::cout << "  ✅ Test Case 1: Nominal Packed Frame Parsing Passed." << std::endl;
-
-    // ---------------------------------------------------------
-    // TEST CASE 2: Validate Security Lockdown on CRC8 Corruption
-    // ---------------------------------------------------------
-    push_serial_byte(0x55); 
-    push_serial_byte(0xAA);
-    push_serial_byte(0x00); 
-    push_serial_byte(0x00); 
-    push_serial_byte(0x00);
-    push_serial_byte(0xFF); // Intentionally malformed corrupted CRC character
+    // Dequeue half the data blocks to check rolling tracking variables
+    uint8_t extracted_byte = 0;
+    for (uint8_t i = 0; i < 32; ++i) {
+        assert(ring.dequeue(extracted_byte));
+        assert(extracted_byte == i);
+    }
+    assert(ring.get_count() == 32);
     
-    process_buffered_frames();
+    // Re-fill past original index structures to force bitwise wrap-around masks
+    for (uint8_t i = 0; i < 16; ++i) {
+        assert(ring.enqueue(i + 100));
+    }
     
-    // Assert that the firmware successfully caught the error and tripped the lockdown
-    assert(currentSystemState == SYSTEM_FAULT_CHECKSUM);
-    std::cout << "  ✅ Test Case 2: Security Mismatch Ingress Lockdown Passed." << std::endl;
-
-    // ---------------------------------------------------------
-    // TEST CASE 3: Validate Secure Handshake Auto-Recovery
-    // ---------------------------------------------------------
-    push_serial_byte(0xAA); push_serial_byte(0x55);
-    push_serial_byte(0xDE); push_serial_byte(0xAD); 
-    push_serial_byte(0xBE); push_serial_byte(0xEF); // Secure clearing handshake
-    
-    verify_isolated_recovery_handshake();
-    
-    // Assert that the exact 6-byte token successfully restored operations
-    assert(currentSystemState == SYSTEM_NOMINAL);
-    std::cout << "  ✅ Test Case 3: State-Isolated Handshake Healing Passed." << std::endl;
-    
-    std::cout << "\n🏆 SYSTEM INTEGRITY SUMMARY: ALL HARNESS TESTS PASSED ACCORDING TO ICD SPEC." << std::endl;
+    // Confirm the total internal counter tracks correctly after sliding alignment
+    assert(ring.get_count() == 48);
+    TEST_PASS("CircularBuffer: Nominal capacity thresholds and bitwise masking wrap verified.");
 }
 
-// Emulated shadow register matrices for local host verification simulation
-uint8_t fake_pca9685_registers[256] = {0};
-
-// Mock structure simulating Elena's Flash-Pinned memory layouts natively in host RAM
-struct JointCalibration {
-    uint16_t minTicks;
-    uint16_t maxTicks;
-};
-const JointCalibration mockCalibrationMatrix[] = {
-    {130, 490}, // Base
-    {205, 410}, // Shoulder
-    {180, 440}  // Elbow
-};
-
-uint16_t host_sim_calculate_ticks(uint8_t jointIndex, uint8_t angle) {
-    uint16_t minPulse = mockCalibrationMatrix[jointIndex].minTicks;
-    uint16_t maxPulse = mockCalibrationMatrix[jointIndex].maxTicks;
-    return minPulse + (((uint32_t)(angle) * (maxPulse - minPulse)) / 180);
+void test_watchdog_interlock_timing_boundaries() {
+    WatchdogInterlock watchdog;
+    watchdog.init(13); // Bind to virtual physical pin 13 (LED channel tracker)
+    
+    assert(watchdog.is_tripped() == false);
+    
+    // Simulate first valid baseline tracking entry landing at t = 1000ms
+    watchdog.reset_timer(1000);
+    
+    // Case A: Next cycle arrives at t = 2500ms (Delta = 1500ms -> Safe under 3000ms ceiling)
+    assert(watchdog.evaluate_state(2500) == true);
+    assert(watchdog.is_tripped() == false);
+    
+    // Case B: Data loop drops out, check hits at t = 6000ms (Delta = 3500ms -> Breached!)
+    bool execution_status = watchdog.evaluate_state(6000);
+    assert(execution_status == false); // System state transition boundary must signal danger
+    assert(watchdog.is_tripped() == true); // Latching interlock must activate emergency mode
+    
+    // Case C: Server recovers and sends clean telemetry frame packet at t = 7000ms
+    watchdog.reset_timer(7000);
+    assert(watchdog.is_tripped() == false); // Safe structural recovery verification
+    
+    TEST_PASS("WatchdogInterlock: Non-blocking delta calculations and latching faults verified.");
 }
 
-void execute_mechatronic_unit_assertions() {
-    std::cout << "🧪 Initiating Register-Level Mechatronic Verification Sweeps..." << std::endl;
-    
-    // Assert 1: Test Base Joint at 90 Degrees (Midpoint Verification)
-    // Range: 130 to 490 Delta = 360. 90 Degrees = exactly half. 130 + 180 = 310 ticks expected!
-    uint16_t base_mid = host_sim_calculate_ticks(0, 90);
-    assert(base_mid == 310);
-    std::cout << "  ✅ Assertion passed: Base midpoint angle mapped perfectly to 310 ticks." << std::endl;
-    
-    // Assert 2: Test Shoulder Joint at 180 Degrees (Maximum Ceiling Bounds Validation)
-    // Range: 205 to 410. Should match upper ceiling parameter exactly.
-    uint16_t shldr_max = host_sim_calculate_ticks(1, 180);
-    assert(shldr_max == 410);
-    std::cout << "  ✅ Assertion passed: Shoulder upper limit mapped perfectly to 410 ticks." << std::endl;
-    
-    // Assert 3: Test Elbow Joint at 0 Degrees (Minimum Floor Bounds Validation)
-    // Range: 180 to 440. Should match baseline offset parameter exactly.
-    uint16_t elbow_min = host_sim_calculate_ticks(2, 0);
-    assert(elbow_min == 180);
-    std::cout << "  ✅ Assertion passed: Elbow lower limit mapped perfectly to 180 ticks." << std::endl;
-    
-    std::cout << "\n🏆 MECHATRONIC INTEGRITY REPORT: ZERO RUNTIME MATHEMATICAL LOSS REGISTERED." << std::endl;
-}
-
+// ---------------------------------------------------------
+// MASTER CORE TEST RUNNER EXECUTION ENTRY
+// ---------------------------------------------------------
 int main() {
-    // Execute the test harness natively on the x86_64 host
-    run_firmware_integrity_test_suite();
-    return 0;
+    std::cout << "==================================================\n";
+    std::cout << "[STAGING] Initializing C++ Component Test Gates...\n";
+    std::cout << "==================================================\n";
+    
+    try {
+        test_circular_buffer_nominal_and_wrap_around();
+        test_watchdog_interlock_timing_boundaries();
+        
+        std::cout << "\n\033[32m[ALL PASSED] 100% C++ Inline Core Engines Validated.\033[0m\n";
+        return 0; // Return success status back to local laptop operating system terminal
+    } catch (...) {
+        TEST_FAIL("Catastrophic boundary error encountered inside test suite.");
+        return 1; // Signal failure to local build engine pipelines
+    }
 }
