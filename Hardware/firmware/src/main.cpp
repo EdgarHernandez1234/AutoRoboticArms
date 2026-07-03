@@ -6,7 +6,48 @@
   // Fallbacks for local native testing on your MacBook
   #include <ctime>
   #include <chrono>
-  uint32_t millis() { return time(NULL) * 1000; }
+  #include <cstdint>
+
+inline uint32_t millis() {
+      // Relative 0ms alignment parameters
+      static bool is_initialized = false;
+      static auto baseline_epoch = std::chrono::steady_clock::now();
+      
+      // Latched cycle profiling state trackers
+      static auto last_execution_call = std::chrono::steady_clock::now();
+      static uint32_t virtual_accumulated_time_ms = 0;
+
+      auto current_wall_clock = std::chrono::steady_clock::now();
+
+      //  Establish Time-Zero on initial boot invocation
+      if (!is_initialized) {
+          baseline_epoch = current_wall_clock;
+          last_execution_call = current_wall_clock;
+          virtual_accumulated_time_ms = 0;
+          is_initialized = true;
+          return virtual_accumulated_time_ms;
+      }
+
+      // Compute raw difference between loop steps
+      auto elapsed_since_last_tick = std::chrono::duration_cast<std::chrono::milliseconds>(
+          current_wall_clock - last_execution_call
+      ).count();
+
+      // SPHERICAL FILTER PASS: Trap both thread scheduling stutters and deep sleep resume leaps
+      // If a single cycle steps forward by more than 150ms, it is an environmental anomaly.
+      if (elapsed_since_last_tick > 150) {
+          // Clamp and saturate: pass forward a nominal step to stabilize the watchdog tracking
+          virtual_accumulated_time_ms += 1; 
+      } else {
+          // Nominal path: step forward predictably in unison with actual elapsed time
+          virtual_accumulated_time_ms += static_cast<uint32_t>(elapsed_since_last_tick);
+      }
+
+      // Snapshot the active timeline point to evaluate the next cycle block iteration
+      last_execution_call = current_wall_clock;
+
+      return virtual_accumulated_time_ms;
+  }
 #endif
 
 #include "../include/circular_buffer.h"
