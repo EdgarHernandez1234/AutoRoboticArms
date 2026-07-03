@@ -5,3 +5,5 @@ So here will be the layer that works with both the hardware layer and also cloud
 ## Pre-Sprint
 
 ## Sprint 1:
+- Setting up my raspberry Pi Docker environment for this layer
+- 
