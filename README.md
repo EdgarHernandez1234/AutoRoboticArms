@@ -1,8 +1,8 @@
 # AutoRoboticArms
 
-## Refined Idea: Two simply made robotic arms being able to function properly with an ai being able to control them from within my homelab. This Project is meant to expand my knowledge on Embedded Hardware, Software, and Networking. Because interdisciplinary knowledge is cool
+## Refined Idea: A simply made robotic arms being able to function properly with an ai being able to control them from within my homelab. Eventually I will incorperate an addtional arm. This Project is meant to expand my knowledge on Embedded Systems, Software, and Cloud. Because interdisciplinary knowledge is cool.
 
-## Current Goal For the week: Finalize hardware layer's file architecture this week
+## Current Goal For the week: Finish Sprint 2 of the Software Layer
 
 Starting May 16 2026
 
@@ -22,3 +22,10 @@ June 2026
 - Will start the pre-flight checks before starting off my first software layer sprint. Also started pre-flight checks before starting off the first cloud layer sprint at a later time
 - Documented the list of terms I need to know for each of the three layers in order to strengthem them individually or to strengthen them as part of this mega project.
 - Decided to finish all the pre-flight checks for each layer to prevent making this project more complex than it needs to be and to actually make it exist first.
+- Finished armoring the Hardware Layer's firmware code to use C++ Object Oriented Programming and the host app now is properly reorganized
+- Updated my raspberry Pi environment for faster implementation
+
+
+July 2025
+- Currently starting on the Software Layer in the meantime while finalizing hardware requirements
+- 
