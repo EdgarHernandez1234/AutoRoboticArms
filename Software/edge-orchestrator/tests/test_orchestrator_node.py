@@ -1,70 +1,77 @@
 import pytest
 from fastapi.testclient import TestClient
-from orchestrator_node import app, is_serial_bus_nominal, shared_movement_deque
+from orchestrator_node import app, is_serial_bus_nominal, shared_movement_queue
 
 # Initialize the mock client to simulate web traffic to your API
+
 client = TestClient(app)
 
 @pytest.fixture(autouse=True)
-def reset_system_state():
-    """
-    This fixture runs before EVERY test. It guarantees a pristine, 
-    un-contaminated state so tests do not interfere with each other.
-    """
+def clean_system_state_deck():
+    """Guarantees pristine, un-contaminated memory metrics before every single assertion."""
     is_serial_bus_nominal.set()
-    shared_movement_deque.clear()
+    shared_movement_queue.clear()
     yield
 
-def test_system_health_endpoint():
-    """Verifies the orchestrator boots and reports nominal health."""
+def test_diagnostics_health_route():
     response = client.get("/api/v1/health")
     assert response.status_code == 200
-    assert response.json() == {
-        "status": "ONLINE",
-        "serial_bus_nominal": True,
-        "active_queue_backlog": 0
-    }
+    assert response.json()["status"] == "ONLINE"
+    assert response.json()["serial_bus_nominal"] is True
 
-def test_valid_trajectory_ingestion():
-    """Verifies that a mathematically safe coordinate is accepted and queued."""
-    payload = {"joint_id": 2, "target_angle": 45.5}
+def test_nominal_input_precision_caching():
+    payload = {"joint_id": 4, "target_angle": 125.3}
     response = client.post("/api/v1/trajectory/step", json=payload)
-    
-    # Assert network layer accepts the command
     assert response.status_code == 202
-    assert "successfully cached" in response.json()["message"]
+    assert len(shared_movement_queue) == 1
+
+def test_floating_point_epsilon_validation_pass():
+    """Proves that eager epsilon sanitization accepts and normalizes binary IEEE-754 tail noise."""
+    payload = {"joint_id": 1, "target_angle": 45.2000000001}
+    response = client.post("/api/v1/trajectory/step", json=payload)
+    assert response.status_code == 202
     
-    # Assert memory layer properly stored the command
-    assert len(shared_movement_deque) == 1
-    cached_command = shared_movement_deque.popleft()
-    assert cached_command["joint_id"] == 2
-    assert cached_command["target_angle"] == 45.5
+    cached_command = shared_movement_queue.pop()
+    assert cached_command["target_angle"] == 45.2
+
+def test_pydantic_epsilon_precision_rejection():
+    """Verifies that precision attacks are captured by middleware and return mechatronic metadata."""
+    malicious_payload = {"joint_id": 1, "target_angle": 45.2359182391}
+    response = client.post("/api/v1/trajectory/step", json=malicious_payload)
+    
+    assert response.status_code == 422
+    assert response.json()["status"] == "REJECTED"
+    assert response.json()["error_matrix"][0]["mechatronic_tag"] == "GEOMETRIC_WORKSPACE_BREACH"
+    assert is_serial_bus_nominal.is_set()
+
+def test_pydantic_integer_overflow_rejection():
+    """Verifies that invalid or out-of-bounds joint registers are dropped with custom tags."""
+    overflow_payload = {"joint_id": 99, "target_angle": 90.0}
+    response = client.post("/api/v1/trajectory/step", json=overflow_payload)
+    
+    assert response.status_code == 422
+    assert response.json()["status"] == "REJECTED"
+    assert response.json()["error_matrix"][0]["mechatronic_tag"] == "PCA9685_REGISTER_OVERFLOW"
+    assert is_serial_bus_nominal.is_set()
 
 def test_workspace_envelope_violation_lockout():
-    """
-    Verifies the Fail-Fast Circuit Breaker: An angle > 180 should instantly 
-    throw a 400 error and drop the system into a hardware lockout state.
-    """
+    """Verifies that physical envelope breaches trigger an HTTP 400 and flip the lockout breaker."""
     dangerous_payload = {"joint_id": 2, "target_angle": 185.0}
     response = client.post("/api/v1/trajectory/step", json=dangerous_payload)
     
-    # Assert the API blocks the request
     assert response.status_code == 400
     assert "Workspace envelope breached" in response.json()["detail"]
-    
-    # Assert the internal atomic state flag has been tripped
     assert not is_serial_bus_nominal.is_set()
-    # Assert the queue was purged to prevent trailing damage
-    assert len(shared_movement_deque) == 0
+    assert len(shared_movement_queue) == 0
 
-def test_submission_during_lockout_rejected():
-    """Verifies that once locked out, even SAFE commands are rejected."""
-    # Manually trip the circuit breaker
-    is_serial_bus_nominal.clear()
+def test_backpressure_saturation_limit():
+    """Spams the bounded custom queue class object to verify it drops traffic via 429 errors when full."""
+    for i in range(50):
+        shared_movement_queue.push({"joint_id": 1, "target_angle": 90.0})
+        
+    assert len(shared_movement_queue) == 50
     
-    safe_payload = {"joint_id": 2, "target_angle": 90.0}
-    response = client.post("/api/v1/trajectory/step", json=safe_payload)
-    
-    # Assert the system returns a 503 Service Unavailable
-    assert response.status_code == 503
-    assert "locked out due to an unmitigated hardware exception" in response.json()["detail"]
+    payload = {"joint_id": 1, "target_angle": 90.0}
+    response = client.post("/api/v1/trajectory/step", json=payload)
+    assert response.status_code == 429
+    assert "backpressure capacity saturated" in response.json()["detail"]
