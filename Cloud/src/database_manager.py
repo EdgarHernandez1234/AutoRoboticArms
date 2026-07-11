@@ -1,7 +1,25 @@
 # database_manager.py
 import os
+from typing import Optional
 from sqlmodel import create_engine, SQLModel, Session
 from sqlalchemy import event
+from sqlalchemy.engine import Engine
+
+# Global reference handles for deferred tracking states
+_engine: Optional[Engine] = None
+
+
+def get_engine() -> Engine:
+    """
+    Marcus's Dynamic Import Order Shield.
+    Evaluates filesystem paths and environment states lazily upon dynamic execution call.
+    Prevents import-ordering leakage bugs between test harnesses and production servers.
+    """
+    global _engine
+    
+    # Return the existing cached engine instance if it has already been initialized
+    if _engine is not None:
+        return _engine
 
 # HARDENING PASS: Read environmental targets, fall back cleanly to a dedicated local directory
 DATABASE_DIR = os.getenv("TELEMETRY_STORAGE_DIR", "storage_chunks")
@@ -20,10 +38,12 @@ connect_args = {
     "timeout": 60.0,
     "check_same_thread": False
 }
+    
+# Instantiate the secure multi-threaded engine reference link safely
+_engine = create_engine(DATABASE_URL, echo=False, connect_args=connect_args)
 
-engine = create_engine(DATABASE_URL, echo=False, connect_args=connect_args)
-
-@event.listens_for(engine, "connect")
+# Attach our high-concurrency WAL pragma connection listeners programmatically
+@event.listens_for(_engine, "connect")
 def activate_sqlite_wal_mode(dbapi_connection, connection_record):
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
@@ -31,10 +51,15 @@ def activate_sqlite_wal_mode(dbapi_connection, connection_record):
     cursor.execute("PRAGMA cache_size=-64000;")
     cursor.close()
 
+    return _engine
+
 def initialize_database():
-    """Declares table structures natively across the runtime boundary."""
-    SQLModel.metadata.create_all(engine)
+    """Natively constructs database constraints utilizing the deferred factory link."""
+    active_engine = get_engine()
+    SQLModel.metadata.create_all(active_engine)
 
 def get_db_session():
-    with Session(engine) as session:
+    """Yields active transactional contexts bound directly to the dynamic factory core."""
+    active_engine = get_engine()
+    with Session(active_engine) as session:
         yield session

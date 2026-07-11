@@ -12,7 +12,7 @@ TEST_STORAGE_DIR = "./test_storage_sandbox"
 os.environ["TELEMETRY_STORAGE_DIR"] = TEST_STORAGE_DIR
 
 
-from src.database_manager import engine, initialize_database
+from src.database_manager import _engine, initialize_database
 from src.models import NodeConfiguration, TelemetryIngressQueue
 
 
@@ -44,7 +44,7 @@ def test_sqlite_wal_mode_activation():
     Asserts that our SQLAlchemy connection listener natively forces the engine driver
     into Write-Ahead Logging (WAL) Mode to eliminate core loop lock contention stalls.
     """
-    with engine.connect() as connection:
+    with _engine.connect() as connection:
         result = connection.exec_driver_sql("PRAGMA journal_mode;").fetchone()
         assert result is not None
         assert result[0].lower() == "wal", "Vulnerability Error: Database failed to force WAL journal mode!"
@@ -55,7 +55,7 @@ def test_database_table_compilation():
     Lifecycle Validation: Reflective Structural Pass.
     Inspects disk topology mappings via SQLAlchemy reflection to verify tables compiled correctly.
     """
-    inspector = inspect(engine)
+    inspector = inspect(_engine)
     discovered_tables = inspector.get_table_names()
     
     assert "node_configurations" in discovered_tables, "Schema Error: node_configurations table missing!"
@@ -78,7 +78,7 @@ def test_profile_name_uniqueness_constraint():
     Model Functional Validation: Identity Constraints.
     Verifies that the database strictly rejects duplicate configuration names, preventing profile overwrites.
     """
-    with Session(engine) as session:
+    with Session(_engine) as session:
         # Commit first record cleanly
         config1 = NodeConfiguration(profile_name="unique_bench_profile")
         session.add(config1)
@@ -100,7 +100,7 @@ def test_telemetry_ingress_queue_future_proofing_tag():
     Asserts that every ingestion snap automatically logs a default schema version integer tag
     to ensure complete backward compatibility during downstream cloud processing runs.
     """
-    with Session(engine) as session:
+    with Session(_engine) as session:
         ingress_record = TelemetryIngressQueue(
             timestamp=1719792000.0,
             left_arm_protobuf_blob=b"\x08\x5a\x12\x04\x12\x02\x00\x01",
