@@ -298,3 +298,22 @@ Testing/
 # Database files
 *.db
 *.sqlite3
+
+# Python Runtime Caches
+__pycache__/
+*.pyc
+
+# Local Python Virtual Environment
+venv/
+.venv/
+
+# Active Local Hardware Storage Assets
+storage/
+chunks/
+*.db
+*.db-wal
+*.db-shm
+
+# Automated Testing Sandbox Paths
+test_storage_sandbox/
+.pytest_cache/
