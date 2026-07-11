@@ -12,7 +12,7 @@ TEST_STORAGE_DIR = "./test_storage_sandbox"
 os.environ["TELEMETRY_STORAGE_DIR"] = TEST_STORAGE_DIR
 
 
-from src.database_manager import _engine, initialize_database
+from src.database_manager import _engine, initialize_database, get_engine
 from src.models import NodeConfiguration, TelemetryIngressQueue
 
 
@@ -44,11 +44,11 @@ def test_sqlite_wal_mode_activation():
     Asserts that our SQLAlchemy connection listener natively forces the engine driver
     into Write-Ahead Logging (WAL) Mode to eliminate core loop lock contention stalls.
     """
-    with _engine.connect() as connection:
+    active_engine = get_engine()
+    with active_engine.connect() as connection:
         result = connection.exec_driver_sql("PRAGMA journal_mode;").fetchone()
         assert result is not None
-        assert result[0].lower() == "wal", "Vulnerability Error: Database failed to force WAL journal mode!"
-
+        assert result[0].lower() == "wal"
 
 def test_database_table_compilation():
     """
