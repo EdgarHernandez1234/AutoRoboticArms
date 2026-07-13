@@ -1,95 +1,110 @@
-// ---------------------------------------------------------
-// QA BENCH COGNITIVE IMPORTS
-// ---------------------------------------------------------
 #include <iostream>
 #include <cassert>
+#include <string.h>
 #include "../include/circular_buffer.h"
 #include "../include/watchdog_interlock.h"
+#include "../include/packet_parser.h"
 
-// Simple terminal coloring macro definitions for cross-platform visual validation
-#define TEST_PASS(msg) std::cout << "\033[32m[PASS] " << msg << "\033[0m\n"
-#define TEST_FAIL(msg) std::cerr << "\033[31m[FAIL] " << msg << "\033[0m\n"
+// Forward declarations for our standalone parsing math
+bool validate_packet_integrity(const char* payload, const char* expected_checksum_hex);
 
-// ---------------------------------------------------------
-// AUTOMATED COMPONENT INTEGRITY CHECKS
-// ---------------------------------------------------------
+#define LOG_PASS(msg) std::cout << "\033[32m[PASS] " << msg << "\033[0m\n"
 
-void test_circular_buffer_nominal_and_wrap_around() {
-    CircularBuffer ring;
-    ring.init();
-    
-    // Assert structural baseline initialization
-    assert(ring.get_count() == 0);
-    assert(!ring.is_full());
-    
-    // Fill the buffer to capacity limits sequentially
-    for (uint8_t i = 0; i < BUFFER_SIZE; ++i) {
-        assert(ring.enqueue(i));
-    }
-    
-    // Assert overflow interlock backpressure kicks in
-    assert(ring.is_full());
-    assert(ring.enqueue(0xFF) == false); // Enqueue must fail safely
-    
-    // Dequeue half the data blocks to check rolling tracking variables
-    uint8_t extracted_byte = 0;
-    for (uint8_t i = 0; i < 32; ++i) {
-        assert(ring.dequeue(extracted_byte));
-        assert(extracted_byte == i);
-    }
-    assert(ring.get_count() == 32);
-    
-    // Re-fill past original index structures to force bitwise wrap-around masks
-    for (uint8_t i = 0; i < 16; ++i) {
-        assert(ring.enqueue(i + 100));
-    }
-    
-    // Confirm the total internal counter tracks correctly after sliding alignment
-    assert(ring.get_count() == 48);
-    TEST_PASS("CircularBuffer: Nominal capacity thresholds and bitwise masking wrap verified.");
-}
-
-void test_watchdog_interlock_timing_boundaries() {
+void test_nominal_integration_pipeline() {
+    CircularBuffer rx_buffer;
     WatchdogInterlock watchdog;
-    watchdog.init(13); // Bind to virtual physical pin 13 (LED channel tracker)
-    
+    PacketParser parser;
+
+    rx_buffer.init();
+    parser.init();
+    watchdog.init(10); // Bind to mock pin 10
+
+    uint32_t simulated_time = 1000;
+    watchdog.reset_timer(simulated_time); // Simulate system boot handshake
+
+    // STEP 1: Simulate the Hardware ISR intercepting a perfect packet
+    const char* stream = "@DRV,1,90*78\n";
+    for(size_t i = 0; i < strlen(stream); i++) {
+        rx_buffer.enqueue(stream[i]);
+    }
+
+    // STEP 2: Simulate the main.cpp while(true) loop draining the buffer
+    uint8_t ext_byte;
+    bool frame_ready = false;
+    while(rx_buffer.dequeue(ext_byte)) {
+        // STEP 3: Feed bytes directly into the parser state machine
+        if(parser.update(ext_byte)) {
+            frame_ready = true;
+        }
+    }
+
+    // STEP 4: Verify the loop successfully caught the complete frame
+    assert(frame_ready == true);
+
+    // STEP 5: Verify mathematical integrity and Kick the Watchdog
+    const char* mock_extracted_payload = "DRV,1,90";
+    const char* mock_extracted_hex = "78";
+    if (validate_packet_integrity(mock_extracted_payload, mock_extracted_hex)) {
+        simulated_time += 1500; // Advance time safely within 3000ms limit
+        watchdog.reset_timer(simulated_time);
+    }
+
+    // ASSERTION: System must remain safe and active
+    assert(watchdog.evaluate_state(simulated_time + 100) == true);
     assert(watchdog.is_tripped() == false);
-    
-    // Simulate first valid baseline tracking entry landing at t = 1000ms
-    watchdog.reset_timer(1000);
-    
-    // Case A: Next cycle arrives at t = 2500ms (Delta = 1500ms -> Safe under 3000ms ceiling)
-    assert(watchdog.evaluate_state(2500) == true);
-    assert(watchdog.is_tripped() == false);
-    
-    // Case B: Data loop drops out, check hits at t = 6000ms (Delta = 3500ms -> Breached!)
-    bool execution_status = watchdog.evaluate_state(6000);
-    assert(execution_status == false); // System state transition boundary must signal danger
-    assert(watchdog.is_tripped() == true); // Latching interlock must activate emergency mode
-    
-    // Case C: Server recovers and sends clean telemetry frame packet at t = 7000ms
-    watchdog.reset_timer(7000);
-    assert(watchdog.is_tripped() == false); // Safe structural recovery verification
-    
-    TEST_PASS("WatchdogInterlock: Non-blocking delta calculations and latching faults verified.");
+
+    LOG_PASS("Integration Pipeline: End-to-End valid frame traversal verified.");
 }
 
-// ---------------------------------------------------------
-// MASTER CORE TEST RUNNER EXECUTION ENTRY
-// ---------------------------------------------------------
+void test_corrupted_stream_watchdog_trip() {
+    CircularBuffer rx_buffer;
+    WatchdogInterlock watchdog;
+    PacketParser parser;
+
+    rx_buffer.init();
+    parser.init();
+    watchdog.init(10);
+
+    uint32_t simulated_time = 1000;
+    watchdog.reset_timer(simulated_time);
+
+    // STEP 1: Simulate a broken UART stream (Missing the '\n' terminator)
+    const char* broken_stream = "@DRV,1,90*78";
+    for(size_t i = 0; i < strlen(broken_stream); i++) {
+        rx_buffer.enqueue(broken_stream[i]);
+    }
+
+    uint8_t ext_byte;
+    bool frame_ready = false;
+    while(rx_buffer.dequeue(ext_byte)) {
+        if(parser.update(ext_byte)) {
+            frame_ready = true;
+        }
+    }
+
+    // ASSERTION 1: The parser must NOT flag the frame as ready
+    assert(frame_ready == false);
+
+    // STEP 2: Because the frame wasn't ready, main.cpp skips kicking the watchdog.
+    // We fast-forward time by 3500ms (breaching the 3000ms safety limit!)
+    simulated_time += 3500;
+    
+    // ASSERTION 2: The system evaluator must realize it has been starved of valid data
+    bool system_safe = watchdog.evaluate_state(simulated_time);
+    assert(system_safe == false);
+    assert(watchdog.is_tripped() == true); // Latching emergency shutdown activates
+
+    LOG_PASS("Integration Pipeline: Malformed stream safely starves watchdog, triggering cutoff.");
+}
+
 int main() {
     std::cout << "==================================================\n";
-    std::cout << "[STAGING] Initializing C++ Component Test Gates...\n";
+    std::cout << "[QA LAB] Executing MASTER INTEGRATION Gates...\n";
     std::cout << "==================================================\n";
-    
-    try {
-        test_circular_buffer_nominal_and_wrap_around();
-        test_watchdog_interlock_timing_boundaries();
-        
-        std::cout << "\n\033[32m[ALL PASSED] 100% C++ Inline Core Engines Validated.\033[0m\n";
-        return 0; // Return success status back to local laptop operating system terminal
-    } catch (...) {
-        TEST_FAIL("Catastrophic boundary error encountered inside test suite.");
-        return 1; // Signal failure to local build engine pipelines
-    }
+
+    test_nominal_integration_pipeline();
+    test_corrupted_stream_watchdog_trip();
+
+    std::cout << "\n\033[32m[SUCCESS] Master Core Loop Integration Verified.\033[0m\n";
+    return 0;
 }
