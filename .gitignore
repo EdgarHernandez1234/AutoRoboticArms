@@ -317,3 +317,9 @@ chunks/
 # Automated Testing Sandbox Paths
 test_storage_sandbox/
 .pytest_cache/
+
+# Block local compiled test binaries and build folders
+*.exe
+*.out
+*.o
+*.hex
