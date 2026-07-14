@@ -40,6 +40,10 @@ void cut_actuator_electrical_rails(uint8_t safety_pin) {
 }
 #else
 // Mock declarations for native testing compilation on developer laptops
-void configure_hardware_interlock_pins(uint8_t safety_pin) {}
-void cut_actuator_electrical_rails(uint8_t safety_pin) {}
+void configure_hardware_interlock_pins(uint8_t safety_pin) {
+    (void)safety_pin; // Explicitly mutes the unused-parameter compiler warning
+}
+void cut_actuator_electrical_rails(uint8_t safety_pin) {
+    (void)safety_pin; // Clean, zero-overhead, zero-byte compilation footprint
+}
 #endif
