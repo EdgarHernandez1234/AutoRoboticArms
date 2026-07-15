@@ -15,19 +15,27 @@ jobs:
 
     - name: Initialize Bare-Metal Cross Compiler Environment
       run: sudo apt-get update && sudo apt-get install -y g++ gcc-avr avr-libc
-
+    
+    # 5. STATIC SCANNING: Audit code health and block dynamic heap leaks
     - name: Run Static Analyzer & Code Safety Scanners
       run: |
         # Verifies code is free of uninitialized fields or dynamic allocations
         g++ -Wall -Wextra -Werror -std=c++11 -fsyntax-only ./Hardware/firmware/src/*.cpp
 
+    # 6. COMPILATION PASS: Provision target paths and execute linker commands
+    # Force the environment runner to create the target directory recursively
+    # Compile and bind files into the newly created folder
     - name: Build Automated Integration Test Executable Image
       run: |
+        mkdir -p Hardware/firmware/build
+
         g++ -Wall -O2 -std=c++11 \
           ./Hardware/firmware/tests/test_firmware_core.cpp \
           ./Hardware/firmware/src/circular_buffer.cpp \
           ./Hardware/firmware/src/packet_parser.cpp \
           ./Hardware/firmware/src/watchdog_interlock.cpp \
+          -I Hardware/firmware/include \
+          -D RUNNING_ON_LAPTOP \
           -o ./Hardware/firmware/build/test_firmware_core
 
     - name: Execute Non-Blocking Micro-Clock Simulations
