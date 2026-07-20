@@ -12,11 +12,13 @@ I want a robotic arm with security measures put into place that can work by itse
 - Raspberry Pi 4 Model B
 - Ubuntu Server LTS serial ports
 - USB-A to USB-B cord
+- Expanded PVC foam Sintra
 
 ### Software:
 - Pytest
 - Python venv
 - Cmake
+- Docker
 
 ## Sprints
 
@@ -56,4 +58,5 @@ I want a robotic arm with security measures put into place that can work by itse
 
 ### Sprint 4: Robotic Arm assembly
 - Researching possible materials to make robotic arm without a 3D printer for first prototype
-- Hardware tech stack will be updated once I have my materials ready. Meanwhile, will work on software layer
+- Full hardware materials will be updated on tech stack with the final assembly of the first robotic arm
+- Wrote my unit tests early for the firmware before deploying on robotic arm

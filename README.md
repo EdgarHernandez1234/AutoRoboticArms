@@ -2,7 +2,7 @@
 
 ## Refined Idea: A simply made robotic arms being able to function properly with an ai being able to control them from within my homelab. Eventually I will incorperate an addtional arm. This Project is meant to expand my knowledge on Embedded Systems, Software, and Cloud. Because interdisciplinary knowledge is cool.
 
-## Current Goal For the week: Finish Sprint 2 of the Software Layer
+## Current Goal For the week: Complete Unit tests for Sprint 4 of Hardware Layer
 
 Starting May 16 2026
 
@@ -28,4 +28,4 @@ June 2026
 
 July 2025
 - Currently starting on the Software Layer in the meantime while finalizing hardware requirements
-- 
+- Completed Sprint 1 for the software and cloud layer
