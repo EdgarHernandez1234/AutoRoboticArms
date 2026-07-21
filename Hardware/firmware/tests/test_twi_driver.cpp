@@ -2,44 +2,59 @@
 #include <assert.h>
 #include <stdio.h>
 
-void run_twi_driver_mvp_tests(void) {
-    printf("[STAGING]: Initializing TWI Driver Testing Pass...\n");
-    
-    // 1. Verify initialization clears our virtual peripheral bus tracking map
+void run_armored_twi_tests(void) {
+    printf("[STAGING]: Initializing Armored TWI Driver Test Suite...\n");
+
+    // 0. Baseline Initialization
     twi_init();
+    assert(twi_get_state() == TWI_IDLE);
+
+    // TEST CASE A: The Chaining Sequence Violation Trap
+    printf("  [TEST A]: Executing Out-of-Order Sequence Violation...\n");
+    // Attempting to write a data byte without claiming the bus via twi_start() first
+    bool bad_write = twi_write(0x20); 
+    assert(bad_write == false); // The internal guard must reject the operation
+    assert(twi_get_state() == TWI_IDLE); // The state must remain unchanged
+    printf("    [PASS]: Driver successfully rejected uninitialized twi_write().\n");
+
+    // TEST CASE B: Virtual Out-of-Bounds Memory Invalidation
+    printf("  [TEST B]: Executing Memory Boundary Overrun...\n");
+    twi_start();
+    twi_write(0x80); // Step 1: Device Address (Write Mode)
+    twi_write(255);  // Step 2: Set the internal memory pointer to the absolute edge of the array (Index 255)
     
-    // Assert that a sample register is initially zeroed out
-    assert(mock_twi_bus[0x00] == 0);
-    assert(mock_twi_bus[0xFE] == 0);
-    printf("  [PASS]: TWI driver virtualization mapping initialization confirmed clear.\n");
+    // Step 3: Write a valid byte to the edge index. The pointer will auto-increment to 256 internally.
+    bool good_write = twi_write(0xAA); 
+    assert(good_write == true);
+    assert(mock_twi_bus[255] == 0xAA);
 
-    // 2. Simulate a single-byte register write transaction targeting the PCA9685
-    // Device Address: 0x40 (PCA9685 Base)
-    // Register Address: 0x00 (MODE1 Control Register)
-    // Value Payload: 0x20 (Auto-Increment Enable Flag)
-    uint8_t target_device = 0x40;
-    uint8_t target_register = 0x00;
-    uint8_t expected_payload = 0x20;
+    // Step 4: Attempt a sequential write that pushes the pointer to index 256 (Out of Bounds!)
+    bool overflow_write = twi_write(0xBB);
+    assert(overflow_write == false); // The array boundary guard must intercept and reject this
+    assert(twi_get_state() == TWI_FAULT_STATE); // Driver must lock down
+    printf("    [PASS]: Emulation layer successfully blocked memory pointer overflow and triggered FAULT_STATE.\n");
 
-    bool transaction_status = twi_write_reg(target_device, target_register, expected_payload);
-    
-    // Assert both the nominal return signature and memory position accuracy
-    assert(transaction_status == true);
-    assert(mock_twi_bus[target_register] == expected_payload);
-    printf("  [PASS]: Monolithic byte-write successfully intercept mapped to mock address [0x%02X].\n", target_register);
+    // TEST CASE C & D: Fault State Lockout and Manual Bus Recovery
+    printf("  [TEST C/D]: Verifying Lockout Integrity and Hardware Reset Hook...\n");
+    // Prove that once in a fault state, standard commands are ignored
+    bool locked_start = twi_start(); 
+    assert(locked_start == false); 
 
-    // 3. Stress-test random register assignment locations to confirm alignment stability
-    twi_write_reg(0x40, 0xFA, 0xAA); // LED0_ON_H
-    twi_write_reg(0x40, 0xFB, 0x55); // LED0_OFF_L
-    
-    assert(mock_twi_bus[0xFA] == 0xAA);
-    assert(mock_twi_bus[0xFB] == 0x55);
-    printf("  [PASS]: Dynamic multi-address register validation sweeps complete.\n");
+    // Execute the programmatic recovery hook
+    twi_force_bus_reset();
+    assert(twi_get_state() == TWI_IDLE); // State should snap back to nominal
 
-    printf("[SUCCESS]: Phase A MVP TWI Core verification test suite passed perfectly!\n\n");
+    // Verify the bus is open for business again
+    bool recovered_start = twi_start();
+    assert(recovered_start == true);
+    assert(twi_get_state() == TWI_BUS_SECURED);
+    twi_stop();
+    printf("    [PASS]: Driver successfully recovered from terminal fault state via twi_force_bus_reset().\n");
+
+    printf("\n[SUCCESS]: All Armored TWI Core defenses verified! Host runtime is secure.\n\n");
 }
 
 int main(void) {
-    run_twi_driver_mvp_tests();
+    run_armored_twi_tests();
     return 0;
 }
