@@ -4,64 +4,23 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-// CAPACITY ANCHOR: Must be a power of 2 (16, 32, 64, 128) for bitwise masking
-#define BUFFER_SIZE 64
-#define BUFFER_MASK (BUFFER_SIZE - 1)
+// ⚡ Hardware Capacity Constants
+#define CIRCULAR_BUFFER_CAPACITY 32
+#define CIRCULAR_BUFFER_MASK     (CIRCULAR_BUFFER_CAPACITY - 1) // 0x1F (31 in decimal)
 
-class CircularBuffer {
-private:
-    uint8_t buffer[BUFFER_SIZE];
-    
-    // VOLATILE: Explicitly tells the compiler these will be changed by hardware interrupts
-    volatile uint8_t head;
-    volatile uint8_t tail;
-    volatile uint8_t count;
+// Lock-Free Single-Producer Single-Consumer (SPSC) Ring Buffer Struct
+typedef struct {
+    uint8_t buffer[CIRCULAR_BUFFER_CAPACITY]; // 32-byte static memory array
+    volatile uint8_t head;               // Write pointer (Updated by ISR/Producer)
+    volatile uint8_t tail;               // Read pointer (Updated by Main Loop/Consumer)
+} CircularBuffer;
 
-public:
-    // 1. HARDWARE INIT: Resets the tracking pointers to zero torque
-    void init() {
-        head = 0;
-        tail = 0;
-        count = 0;
-    }
-
-    // 2. INGRESS PIPELINE: Pushes new bytes from the USB Serial ISR into the ring
-    bool enqueue(uint8_t data) {
-        if (count >= BUFFER_SIZE) {
-            return false; // INTERLOCK: Fails safely to prevent buffer overflow/SRAM corruption
-        }
-        buffer[head] = data;
-        
-        // BITWISE WRAP: Extremely fast cycle calculation replacing the heavy modulo (%) operator
-        head = (head + 1) & BUFFER_MASK; 
-        count++;
-        
-        return true;
-    }
-
-    // 3. EGRESS PIPELINE: Extracts bytes for the parser loop
-    bool dequeue(uint8_t &data) {
-        if (count == 0) {
-            return false; // INTERLOCK: Fails safely if the buffer is empty
-        }
-        data = buffer[tail];
-        
-        // BITWISE WRAP
-        tail = (tail + 1) & BUFFER_MASK; 
-        count--;
-        
-        return true;
-    }
-
-    // 4. FAST STATE GUARD: Used by the interrupt gates to check capacity
-    bool is_full() const {
-        return (count >= BUFFER_SIZE);
-    }
-
-    // 5. DIAGNOSTICS: Exposes current payload volume to the watchdog logic
-    uint8_t get_count() const {
-        return count;
-    }
-};
+// Public API Surface
+void circular_buffer_init(CircularBuffer* rb);
+bool circular_buffer_enqueue(CircularBuffer* rb, uint8_t byte);
+bool circular_buffer_dequeue(CircularBuffer* rb, uint8_t* byte_ptr);
+uint8_t circular_buffer_available(const CircularBuffer* rb);
+bool circular_buffer_is_full(const CircularBuffer* rb);
+bool circular_buffer_is_empty(const CircularBuffer* rb);
 
 #endif // CIRCULAR_BUFFER_H
