@@ -1,5 +1,3 @@
-### 🧪 Code Asset 5: `test_conductor.py
-# test_conductor.py
 # Sprint 2 Automated Concurrency & Micro-Batching Test Harness
 import os
 import shutil
@@ -32,7 +30,7 @@ def setup_and_teardown_conductor_environment():
 
 
 def test_telemetry_validation_logic():
-    """Validates Dr. Julian's angle bounds checking logic."""
+    """Validates angle bounds checking logic."""
     assert validate_arm_telemetry(90.0, 45.0, 180.0) is True
     assert validate_arm_telemetry(-5.0, 45.0, 90.0) is False
     assert validate_arm_telemetry(90.0, 185.0, 90.0) is False
@@ -51,7 +49,7 @@ def test_conductor_queue_batch_flushing():
         # Allow threads to run for 1.2 seconds to produce and flush several batches
         time.sleep(1.2)
     finally:
-        # Marcus's Rule: Guaranteed thread stop even if test crashes
+        # Guaranteed thread stop even if test crashes
         orchestrator.stop()
 
     # Query SQLite database to confirm background flusher executed bulk inserts
