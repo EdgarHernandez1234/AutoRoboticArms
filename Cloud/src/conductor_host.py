@@ -1,4 +1,4 @@
-#  Hardened Multi-Threaded Host Orchestrator
+# Hardened Multi-Threaded Host Orchestrator
 import os
 import time
 import queue
@@ -10,7 +10,7 @@ from typing import Dict, Any, Optional
 from sqlmodel import Session
 from src.database_manager import get_engine, initialize_database
 from src.models import TelemetryIngressQueue
-
+from src.proto.telemetry_schema_pb2 import ArmKinematics
 # Configure System Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(threadName)s: %(message)s")
 logger = logging.getLogger("ConductorHost")
@@ -22,7 +22,7 @@ PRODUCER_INTERVAL_SEC = 0.05  # 20 Hz tick loop
 
 
 def validate_arm_telemetry(base: float, shoulder: float, elbow: float) -> bool:
-    """Dr. Julian's Gatekeeper: Validates active arm joint boundaries (0.0 to 180.0 deg)."""
+    """Validates active arm joint boundaries (0.0 to 180.0 deg)."""
     for joint in (base, shoulder, elbow):
         if not isinstance(joint, (int, float)):
             return False
@@ -33,7 +33,7 @@ def validate_arm_telemetry(base: float, shoulder: float, elbow: float) -> bool:
 
 class ConductorOrchestrator:
     """
-    Master Application Control Plane for Option C.
+    Master Application Control Plane for Mechatronic Telemetry Ingestion & Storage.
     Manages high-frequency mechatronic ingestion (Thread 1) and out-of-band
     micro-batch database storage flushes (Thread 2) with bounded memory safety.
     """
@@ -46,7 +46,7 @@ class ConductorOrchestrator:
 
     def start(self):
         """Boots database schema and launches asynchronous worker threads."""
-        logger.info("⚙️ Initializing ConductorHost Storage Tier & Worker Threads...")
+        logger.info("Initializing ConductorHost Storage Tier & Worker Threads...")
         initialize_database()
 
         self.producer_thread = threading.Thread(
@@ -62,14 +62,14 @@ class ConductorOrchestrator:
 
         self.producer_thread.start()
         self.flusher_thread.start()
-        logger.info("🚀 All ConductorHost worker threads engaged successfully.")
+        logger.info("All ConductorHost worker threads engaged successfully.")
 
     def stop(self):
         """Jax's Atomic Shutdown: Sets flag and triggers graceful thread join sequence."""
         if self.shutdown_event.is_set():
             return
             
-        logger.info("🛑 Stop signal captured. Triggering graceful thread shutdown...")
+        logger.info("Stop signal captured. Triggering graceful thread shutdown...")
         self.shutdown_event.set()
 
         if self.producer_thread and self.producer_thread.is_alive():
@@ -78,13 +78,13 @@ class ConductorOrchestrator:
         if self.flusher_thread and self.flusher_thread.is_alive():
             self.flusher_thread.join(timeout=3.0)
 
-        logger.info("✅ ConductorHost shutdown sequence complete.")
+        logger.info("ConductorHost shutdown sequence complete.")
 
     def _producer_loop(self):
         """
         Thread 1: High-Frequency Mechatronic Kinematics Producer Loop (20 Hz).
         Captures single-arm (left arm) joint telemetry, validates bounds,
-        and pushes snapshot dictionaries to the in-memory queue non-blockingly.
+        compiles into native Protobuf objects, and queues binary payloads.
         """
         simulated_step = 0
         while not self.shutdown_event.is_set():
@@ -98,13 +98,20 @@ class ConductorOrchestrator:
 
             if validate_arm_telemetry(left_base, left_shoulder, left_elbow):
                 # Construct snapshot payload (right arm intentionally unpopulated/empty bytes)
+                left_arm_proto = ArmKinematics(
+                    base_deg=left_base,
+                    shoulder_deg=left_shoulder,
+                    elbow_deg=left_elbow
+                )
+                # Construct snapshot payload for the memory queue
                 snapshot = {
                     "timestamp": time.time(),
                     "system_state": "NOMINAL",
                     "schema_version": 1,
-                    # Mock serialized Protobuf bytes matching single-arm specification
-                    "left_arm_protobuf_blob": f"L_ARM:{left_base:.1f},{left_shoulder:.1f},{left_elbow:.1f}".encode("utf-8"),
-                    "right_arm_protobuf_blob": b"",  # Single-arm option A strategy marker
+                    #  Native C-accelerated binary serialization
+                    "left_arm_protobuf_blob": left_arm_proto.SerializeToString(),
+                    # Single-arm option A strategy marker (0 bytes on wire)
+                    "right_arm_protobuf_blob": b"",  
                     "watchdog_ms": 3000,
                     "sync_status": "PENDING"
                 }
@@ -113,9 +120,9 @@ class ConductorOrchestrator:
                 try:
                     self.telemetry_queue.put_nowait(snapshot)
                 except queue.Full:
-                    logger.warning("⚠️ Telemetry queue FULL (maxsize=100)! Dropping stale frame to prevent latency.")
+                    logger.warning("Telemetry queue FULL (maxsize=100)! Dropping stale frame to prevent latency.")
             else:
-                logger.error("❌ Rejected malformed mechatronic telemetry frame at producer boundary!")
+                logger.error("Rejected malformed mechatronic telemetry frame at producer boundary!")
 
             # Maintain deterministic tick rate
             elapsed = time.time() - start_time
@@ -148,9 +155,9 @@ class ConductorOrchestrator:
                         db_records = [TelemetryIngressQueue(**record) for record in batch]
                         session.add_all(db_records)
                         session.commit()
-                        logger.info(f"💾 Bulk-committed micro-batch of {len(db_records)} telemetry rows to SQLite WAL storage.")
+                        logger.info(f"Bulk-committed micro-batch of {len(db_records)} telemetry rows to SQLite WAL storage.")
                 except Exception as fatal_db_err:
-                    logger.critical(f"❌ Fatal SQLite Write Exception encountered: {fatal_db_err}")
+                    logger.critical(f"Fatal SQLite Write Exception encountered: {fatal_db_err}")
                     # Broadcast shutdown signal on storage failure
                     self.shutdown_event.set()
                     break
