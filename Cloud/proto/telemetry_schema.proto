@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package autoroboticarms.telemetry;
+
+// Reusable Sub-Message for 3-DoF Joint Kinematics (Uses Tags 1-15 for 1-byte headers)
+message ArmKinematics {
+    float base_deg = 1;      // IEEE 754 32-bit float matching physical servo limits
+    float shoulder_deg = 2;
+    float elbow_deg = 3;
+}
+
+// The Master Envelope Message
+message TelemetrySnapshot {
+    // Top-Level Application Versioning
+    uint32 schema_version = 1;
+    double timestamp = 2;
+    string system_state = 3;
+    uint32 watchdog_ms = 4;
+
+    // Modular Hardware Payloads
+    ArmKinematics left_arm = 5;   // Active primary arm payload
+    ArmKinematics right_arm = 6;  // Unpopulated in Option A (Emits 0 bytes)
+
+    // Deprecation Guardrail
+    // Prevents future engineers from reusing old tag IDs or names
+    reserved 7, 8;
+    reserved "old_diagnostic_bytes";
+}
