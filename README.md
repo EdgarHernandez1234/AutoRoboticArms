@@ -2,7 +2,7 @@
 
 ## Refined Idea: A simply made robotic arms being able to function properly with an ai being able to control them from within my homelab. Eventually I will incorperate an addtional arm. This Project is meant to expand my knowledge on Embedded Systems, Software, and Cloud. Because interdisciplinary knowledge is cool.
 
-## Current Goal For the week: Complete Unit tests for Sprint 4 of Hardware Layer
+## Current Goal For the week: Complete the Ubuntu Server Setup for Software Layer
 
 Starting May 16 2026
 
@@ -26,6 +26,13 @@ June 2026
 - Updated my raspberry Pi environment for faster implementation
 
 
-July 2025
+July 20256
 - Currently starting on the Software Layer in the meantime while finalizing hardware requirements
-- Completed Sprint 1 for the software and cloud layer
+- Completed Orchestrator Node and respective unit tests for Software Layer
+- Completed the Conductor Host Cloud version for the CLoud
+- Completed adding a SSH sign-in my Ubuntu Server from my main laptop
+- Completed Zero-Trust Host Provisioning & Token Airlocks for the Cloud Layer
+- Completed Container Network Segmentation & Proxy Perimeter of the Cloud Layer
+
+Aug 2026
+- Completed Armoring Control Plane for Cloud Layer
