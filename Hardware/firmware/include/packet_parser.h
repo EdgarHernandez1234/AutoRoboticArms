@@ -3,73 +3,56 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "./circular_buffer.h"
 
-#define MAX_PACKET_LENGTH 32
+// ⚡ Protocol ICD Constraints
+#define MAX_PAYLOAD_LEN 24 // Max ASCII characters between '@' and '*'
+#define MAX_JOINTS      4  // Supported kinematic servo channels per command
 
-class PacketParser {
-public:
-    enum ParseState {
-        WAIT_FOR_START,
-        ACCUMULATE_PAYLOAD,
-        WAIT_FOR_CHECKSUM
-    };
+// 🎛️ FSM States
+typedef enum {
+    STATE_WAIT_FOR_START = 0, // Idling, scanning for '@' header token
+    STATE_ACCUMULATE_PAYLOAD, // Stash payload chars & calculate rolling XOR checksum
+    STATE_READ_CHECKSUM,      // Read 2 ASCII Hex checksum characters following '*'
+    STATE_VALIDATE_EXECUTE    // Checksum parity match and in-place tokenization
+} ParseState;
 
-private:
-    char packet_buffer[MAX_PACKET_LENGTH];
-    uint8_t write_index;
-    ParseState current_state;
+// 🚦 Process Status Return Codes
+typedef enum {
+    PARSE_BUSY = 0,          // Frame in progress, waiting for more bytes
+    PARSE_SUCCESS_FRAME,     // Valid frame decoded and checksum verified
+    PARSE_ERROR_CHECKSUM,    // Frame complete, but XOR checksum mismatched
+    PARSE_ERROR_OVERFLOW,    // Payload exceeded MAX_PAYLOAD_LEN before '*'
+    PARSE_ERROR_FORMAT       // Invalid ASCII hex character in checksum tail
+} ParseResult;
 
-    // Fixed array outputs to pass parsed values up to main trajectory tracks safely
-    uint8_t parsed_servo_id;
-    int16_t parsed_angle;
+// Decoded Command Data Transfer Container
+typedef struct {
+    char command[8];             // e.g., "DRV"
+    uint8_t angles[MAX_JOINTS];  // Parsed servo angles (0 - 180 deg)
+    uint8_t angle_count;         // Number of valid joint angles parsed
+    bool valid;                  // True if checksum and formatting passed
+} ParsedCommand;
 
-public:
-    // 1. STATE INITIALIZATION: Arms the monitoring perimeters
-    void init() {
-        write_index = 0;
-        current_state = WAIT_FOR_START;
-        parsed_servo_id = 0;
-        parsed_angle = 0;
-        packet_buffer[0] = '\0';
-    }
+// Stateful Parser Memory Layout
+typedef struct {
+    ParseState state;                  // Current FSM state
+    char payload_buf[MAX_PAYLOAD_LEN + 1]; // Local static payload buffer
+    uint8_t payload_idx;               // Write pointer for payload buffer
+    uint8_t calculated_checksum;       // Rolling bitwise XOR parity accumulator
+    char checksum_hex[3];              // Storage for 2 ASCII Hex characters + null
+    uint8_t checksum_idx;              // Index tracker for hex tail read
+    
+    // Diagnostic Metrics
+    uint16_t valid_packets;            // Successfully parsed frames counter
+    uint16_t corrupted_packets;        // Dropped frames counter (checksum fail)
+    uint16_t overflow_packets;         // Dropped frames counter (length overrun)
+} PacketParser;
 
-    // 2. PARSE PERIMETER WATCHDOG: Ingests bytes sequentially from the memory ring buffer
-    bool update(uint8_t data) {
-        switch (current_state) {
-            case WAIT_FOR_START:
-                if (data == '@') { // Start character anchor found
-                    write_index = 0;
-                    current_state = ACCUMULATE_PAYLOAD;
-                }
-                break;
-
-            case ACCUMULATE_PAYLOAD:
-                if (data == '*') { // Payload string boundary limit encountered
-                    packet_buffer[write_index] = '\0'; // Seal current C-string tracking window
-                    current_state = WAIT_FOR_CHECKSUM;
-                } else {
-                    if (write_index < (MAX_PACKET_LENGTH - 3)) { // Defend array bounds against memory overflow
-                        packet_buffer[write_index++] = (char)data;
-                    } else {
-                        init(); // Memory perimeter breached, force immediate state recovery reset
-                    }
-                }
-                break;
-
-            case WAIT_FOR_CHECKSUM:
-                if (data == '\n') {
-                    // Frame tracking closed. Return true to signal token processing execution check is primed
-                    current_state = WAIT_FOR_START;
-                    return true;
-                }
-                break;
-        }
-        return false;
-    }
-
-    // Accessor methods to fetch validated kinematic metrics cleanly
-    uint8_t get_servo_id() const { return parsed_servo_id; }
-    int16_t get_angle() const { return parsed_angle; }
-};
+// Public API Surface
+void packet_parser_init(PacketParser* parser);
+void packet_parser_reset(PacketParser* parser);
+ParseResult packet_parser_process_byte(PacketParser* parser, uint8_t byte, ParsedCommand* out_cmd);
+ParseResult packet_parser_process_buffer(PacketParser* parser, CircularBuffer* cb, ParsedCommand* out_cmd);
 
 #endif // PACKET_PARSER_H

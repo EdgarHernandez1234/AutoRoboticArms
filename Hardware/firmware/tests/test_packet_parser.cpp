@@ -1,78 +1,155 @@
-#include <iostream>
-#include <cassert>
-#include <string.h>
 #include "../include/packet_parser.h"
+#include "../include/circular_buffer.h"
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
 
-// Forward declarations of our standalone parsing functions from packet_parser.cpp
-bool validate_packet_integrity(const char* payload, const char* expected_checksum_hex);
-bool extract_kinematic_payload(char* payload, uint8_t &out_servo_id, int16_t &out_angle);
-
-#define LOG_PASS(msg) std::cout << "\033[32m[PASS] " << msg << "\033[0m\n"
-
-void test_state_machine_ingestion() {
-    PacketParser parser;
-    parser.init();
-    
-    // Simulate receiving a packet byte-by-byte: "@DRV,1,90*5A\n"
-    const char* raw_serial_stream = "@DRV,1,90*5A\n";
-    bool execution_flag = false;
-    
-    for (size_t i = 0; i < strlen(raw_serial_stream); ++i) {
-        execution_flag = parser.update(raw_serial_stream[i]);
-        
-        // The update function should ONLY return true on the very last character '\n'
-        if (i < strlen(raw_serial_stream) - 1) {
-            assert(execution_flag == false);
-        } else {
-            assert(execution_flag == true);
-        }
+/**
+ * @brief Helper function to push an entire string into the CircularBuffer byte-by-byte.
+ */
+static void push_string_to_buffer(CircularBuffer* rb, const char* str) {
+    size_t len = strlen(str);
+    for (size_t i = 0; i < len; i++) {
+        bool ok = circular_buffer_enqueue(rb, (uint8_t)str[i]);
+        assert(ok == true); // Ensure circular buffer capacity is sufficient
     }
-    LOG_PASS("Parser State Machine correctly bounded payload using '@', '*', and '\\n' markers.");
 }
 
-void test_bitwise_xor_checksum_logic() {
-    // Test Case A: Known Valid Parity
-    // Payload: "DRV,1,90" -> XOR across these ASCII characters equals Hex "3B" (just an example value)
-    // Let's use a mathematically verified pair: "DRV,1,90" -> 'D'^'R'^'V'^','^'1'^','^'9'^'0' = 0x51
-    const char* payload = "DRV,1,90";
-    const char* valid_hex = "78"; // This is the expected checksum for the payload "DRV,1,90"
-    assert(validate_packet_integrity(payload, valid_hex) == true);
-    
-    // Test Case B: Corrupted Data (Simulating electrical noise)
-    // Payload changed to "DRV,2,90" but checksum remains "51"
-    const char* corrupted_payload = "DRV,2,90";
-    assert(validate_packet_integrity(corrupted_payload, valid_hex) == false);
+void run_packet_parser_tests(void) {
+    printf("[STAGING]: Initializing Non-Blocking Packet Parser Test Suite...\n");
 
-    LOG_PASS("Bitwise XOR Checksum mathematically verified against string tampering.");
+    CircularBuffer cb;
+    PacketParser parser;
+    ParsedCommand cmd;
+
+    // ------------------------------------------------------------------------
+    // TEST 1: Nominal Valid Command Parsing & In-Place Tokenization
+    // ------------------------------------------------------------------------
+    printf("  [TEST 1]: Verifying Nominal Valid Command Frame Parsing...\n");
+    circular_buffer_init(&cb);
+    packet_parser_init(&parser);
+
+    // Frame: "@DRV,90,45,120*57\n"
+    // Payload: "DRV,90,45,120"
+    // XOR Checksum Calculation: 'D'^'R'^'V'^','^'9'^'0'^','^'4'^'5'^','^'1'^'2'^'0' = 0x3B
+    const char* nominal_frame = "@DRV,90,45,120*57\n";
+    push_string_to_buffer(&cb, nominal_frame);
+
+    ParseResult result = packet_parser_process_buffer(&parser, &cb, &cmd);
+
+    assert(result == PARSE_SUCCESS_FRAME);
+    assert(cmd.valid == true);
+    assert(strcmp(cmd.command, "DRV") == 0);
+    assert(cmd.angle_count == 3);
+    assert(cmd.angles[0] == 90);
+    assert(cmd.angles[1] == 45);
+    assert(cmd.angles[2] == 120);
+    assert(parser.valid_packets == 1);
+    assert(parser.corrupted_packets == 0);
+    printf("    [PASS]: Nominal frame successfully parsed with correct joint angles {90, 45, 120}.\n");
+
+    // ------------------------------------------------------------------------
+    // TEST 2: Corrupted Checksum Rejection & Dropped Frame Counters
+    // ------------------------------------------------------------------------
+    printf("  [TEST 2]: Verifying Corrupted Checksum Rejection...\n");
+    memset(&cmd, 0, sizeof(ParsedCommand));
+    circular_buffer_init(&cb);
+    packet_parser_init(&parser);
+
+    // Frame with intentionally corrupted checksum (0xFF instead of 0x3B)
+    const char* corrupted_frame = "@DRV,90,45,120*FF\n";
+    push_string_to_buffer(&cb, corrupted_frame);
+
+    result = packet_parser_process_buffer(&parser, &cb, &cmd);
+
+    assert(result == PARSE_ERROR_CHECKSUM);
+    assert(cmd.valid == false);
+    assert(parser.valid_packets == 0);
+    assert(parser.corrupted_packets == 1);
+    printf("    [PASS]: Corrupted checksum caught, frame rejected, and corrupted_packets counter incremented.\n");
+
+    // ------------------------------------------------------------------------
+    // TEST 3: Payload Overflow Protection (> 24 Chars Before '*')
+    // ------------------------------------------------------------------------
+    printf("  [TEST 3]: Verifying Payload Overflow Guard (> 24 characters)...\n");
+    circular_buffer_init(&cb);
+    packet_parser_init(&parser);
+
+    // Flooded payload (26 characters before '*'): "DRV,1234567890123456789012"
+    const char* overflow_frame = "@DRV,1234567890123456789012*00\n";
+    push_string_to_buffer(&cb, overflow_frame);
+
+    result = packet_parser_process_buffer(&parser, &cb, &cmd);
+
+    assert(result == PARSE_ERROR_OVERFLOW);
+    assert(parser.overflow_packets == 1);
+    assert(parser.state == STATE_WAIT_FOR_START); // FSM must reset cleanly
+    printf("    [PASS]: Payload overflow caught before array boundary; FSM reset safely.\n");
+
+    // ------------------------------------------------------------------------
+    // TEST 4: Mid-Stream Frame Re-Synchronization (Unexpected '@')
+    // ------------------------------------------------------------------------
+    printf("  [TEST 4]: Verifying Mid-Stream Frame Re-Synchronization...\n");
+    circular_buffer_init(&cb);
+    packet_parser_init(&parser);
+
+    // Partial garbled frame followed immediately by a fresh valid frame:
+    // "@DRV,90,45" (no '*' or '\n') interrupted by "@DRV,180,90*70\n"
+    const char* interrupted_stream = "@DRV,90,45@DRV,180,90*70\n";
+    push_string_to_buffer(&cb, interrupted_stream);
+
+    result = packet_parser_process_buffer(&parser, &cb, &cmd);
+
+    assert(result == PARSE_SUCCESS_FRAME);
+    assert(cmd.valid == true);
+    assert(cmd.angle_count == 2);
+    assert(cmd.angles[0] == 180);
+    assert(cmd.angles[1] == 90);
+    assert(parser.valid_packets == 1);
+    printf("    [PASS]: Unexpected '@' re-synchronized parser instantly; valid second frame executed.\n");
+
+    // ------------------------------------------------------------------------
+    // TEST 5: Boundary Value Analysis (BVA) Angle Clamping (0 - 180 Deg)
+    // ------------------------------------------------------------------------
+    printf("  [TEST 5]: Verifying Boundary Value Analysis (BVA) Servo Angle Clamping...\n");
+    circular_buffer_init(&cb);
+    packet_parser_init(&parser);
+
+    // Out-of-bounds angles string: -50 clamped to 0, 999 clamped to 180
+    // Payload: "DRV,-50,999"
+    // XOR Checksum: 'D'^'R'^'V'^','^'-'^'5'^'0'^','^'9'^'9'^'9' = 0x51
+    const char* bva_frame = "@DRV,-50,999*51\n";
+    push_string_to_buffer(&cb, bva_frame);
+
+    result = packet_parser_process_buffer(&parser, &cb, &cmd);
+
+    assert(result == PARSE_SUCCESS_FRAME);
+    assert(cmd.valid == true);
+    assert(cmd.angles[0] == 0);   // -50 clamped to 0
+    assert(cmd.angles[1] == 180); // 999 clamped to 180
+    printf("    [PASS]: Out-of-bounds angles {-50, 999} successfully clamped to safe bounds {0, 180}.\n");
+
+    // ------------------------------------------------------------------------
+    // TEST 6: Invalid ASCII Hex Characters in Checksum Tail
+    // ------------------------------------------------------------------------
+    printf("  [TEST 6]: Verifying Non-Hex Checksum Tail Rejection...\n");
+    circular_buffer_init(&cb);
+    packet_parser_init(&parser);
+
+    // Frame with non-hex tail characters 'G' and 'Z'
+    const char* bad_hex_frame = "@DRV,90,45*GZ\n";
+    push_string_to_buffer(&cb, bad_hex_frame);
+
+    result = packet_parser_process_buffer(&parser, &cb, &cmd);
+
+    assert(result == PARSE_ERROR_FORMAT);
+    assert(parser.corrupted_packets == 1);
+    printf("    [PASS]: Non-hex checksum character intercepted and rejected cleanly.\n");
+
+    printf("\n[SUCCESS]: All Non-Blocking Packet Parser tests passed with 100%% green assertions!\n\n");
 }
 
-void test_zero_copy_tokenization() {
-    char payload[] = "DRV,3,145"; // Modifiable C-string for strtok
-    uint8_t servo_id = 0;
-    int16_t angle = 0;
-    
-    bool valid_extraction = extract_kinematic_payload(payload, servo_id, angle);
-    
-    assert(valid_extraction == true);
-    assert(servo_id == 3);
-    assert(angle == 145);
-    
-    // Test Malicious/Malformed Prefix Trap
-    char bad_payload[] = "BAD,3,145";
-    assert(extract_kinematic_payload(bad_payload, servo_id, angle) == false);
-
-    LOG_PASS("Zero-copy tokenization successfully extracted integers and blocked bad headers.");
-}
-
-int main() {
-    std::cout << "==================================================\n";
-    std::cout << "[QA LAB] Executing Isolated Packet Parser Tests...\n";
-    std::cout << "==================================================\n";
-    
-    test_state_machine_ingestion();
-    test_bitwise_xor_checksum_logic();
-    test_zero_copy_tokenization();
-    
-    std::cout << "\n\033[32m[SUCCESS] Component Gate Closed. Parser engine is secure.\033[0m\n";
+int main(void) {
+    run_packet_parser_tests();
     return 0;
 }
