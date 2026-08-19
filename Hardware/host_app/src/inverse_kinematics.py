@@ -7,6 +7,9 @@ import math
 L1 = 12.0  # Length of the main shoulder linkage
 L2 = 10.0  # Length of the forearm linkage
 
+SAFE_MIN_REACH = 2.5  # abs(L1 - L2) + 0.5 cm buffer
+SAFE_MAX_REACH = 21.5 # (L1 + L2) - 0.5 cm buffer
+
 # ---------------------------------------------------------
 # 2. CUSTOM EXCEPTION DEFINITIONS
 # ---------------------------------------------------------
@@ -40,7 +43,7 @@ def calculate_joint_angles(x: float, y: float, z: float) -> dict:
     # 2. Safety Perimeter Assertion (Boundary Value Analysis)
     # The arm cannot reach further than its two links laid flat, 
     # nor fold tighter than their physical difference.
-    if distance > (L1 + L2) or distance < abs(L1 - L2):
+    if distance > SAFE_MAX_REACH or distance < SAFE_MIN_REACH:
         raise WorkspaceEnvelopeViolation(
             f"Target ({x}, {y}, {z}) breached safety envelope. Distance: {distance:.2f}cm"
         )
