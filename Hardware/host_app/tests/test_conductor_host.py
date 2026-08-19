@@ -7,200 +7,109 @@ from unittest.mock import MagicMock, patch
 host_main = os.path.abspath(os.path.join(os.path.dirname(__file__), "../src"))
 sys.path.append(host_main)
 
-# Import the orchestrator functions and the exception class
-from conductor_host import calculate_crc8, process_and_transmit
+from conductor_host import ConductorHost
 from inverse_kinematics import WorkspaceEnvelopeViolation
 
-# ---------------------------------------------------------
-# TEST SUITE: DATA-LINK FORMATTING & HARDWARE ORCHESTRATION
-# ---------------------------------------------------------
-# ---------------------------------------------------------
-# MODULE: PARAMETERIZED SAFETY STATE HARNESS (BVA)
-# ---------------------------------------------------------
+# =============================================================================
+# OPTION A: DETERMINISTIC HARDWARE DRIVER UNIT TESTS
+# =============================================================================
 
-# We define a matrix of test cases:
-# (X_target, Y_target, Z_target, Simulated_Exception, Expected_Serial_Call_Count)
-@pytest.mark.parametrize(
-    "x_val, y_val, z_val, simulated_error, should_transmit",
-    [
-        # CASE 1: Nominal Safe Coordinates -> Should Transmit
-        (10.0, 10.0, 10.0, None, True),
-        
-        # CASE 2: Envelope Breach (Max Extension) -> Should Block Transmission
-        (30.0, 0.0, 0.0, WorkspaceEnvelopeViolation("Arm overextended"), False),
-        
-        # CASE 3: Envelope Breach (Minimum Radius) -> Should Block Transmission
-        (1.0, 0.0, 0.0, WorkspaceEnvelopeViolation("Mechanical binding risk"), False),
-        
-        # CASE 4: Total Singularity (Base Origin) -> Should Block Transmission
-        (0.0, 0.0, 0.0, WorkspaceEnvelopeViolation("Origin singularity"), False),
-    ]
-)
-@patch('conductor_host.calculate_joint_angles')
-def test_parameterized_transmission_safety_matrix(
-    mock_ik_solver, x_val, y_val, z_val, simulated_error, should_transmit
-):
+@patch('conductor_host.time.sleep') # Mock sleep to make tests run instantly
+@patch('conductor_host.serial.Serial')
+def test_two_stage_bootstrapped_homing(mock_serial_class, mock_sleep):
     """
-    Parametrized BVA Harness:
-    Pushes multiple target constraints through the orchestrator to assert 
-    that the transmission pipeline securely opens or closes based on the 
-    presence of mathematical exceptions.
+    Verifies DTR stabilization, buffer flushing, and the baseline home frame.
     """
-    # 1. Setup the Mocked Math Brain
-    if simulated_error:
-        # If the test case provides an error, force the math solver to crash
-        mock_ik_solver.side_effect = simulated_error
-    else:
-        # If no error, provide a safe dummy angle dictionary
-        mock_ik_solver.return_value = {"base": 90, "shoulder": 90, "elbow": 90}
+    # 1. Setup the Transport Spy
+    mock_serial_instance = MagicMock()
+    mock_serial_instance.read.return_value = b'K'  # MCU acks successfully
+    mock_serial_class.return_value = mock_serial_instance
 
-    # 2. Setup the Spy (Mocked Serial Port)
-    mock_serial = MagicMock()
-
-    # 3. Execute the target function
-    process_and_transmit(x_val, y_val, z_val, mock_serial)
-
-    # 4. Evaluate the Expected Safety State
-    if should_transmit:
-        # Assert the orchestrator safely passed data to the hardware
-        assert mock_serial.write.call_count == 1
-    else:
-        # Assert the orchestrator trapped the error and protected the hardware
-        assert mock_serial.write.call_count == 0
-
-def test_crc8_checksum_generation():
-    """
-    Asserts that the CRC8 polynomial division exactly matches 
-    our expected hardware specifications. 
-    """
-    # A known payload string
-    payload = "DRV,90,90,90"
+    conductor = ConductorHost(port="/dev/ttyACM0", baud=115200, timeout=0.5)
     
-    # Calculate the checksum
-    checksum = calculate_crc8(payload)
+    # 2. Execute
+    success = conductor.connect_and_home()
+
+    # 3. Assertions
+    assert success is True
+    # Verify OS buffers were flushed to clear bootloader noise
+    mock_serial_instance.reset_input_buffer.assert_called_once()
+    mock_serial_instance.reset_output_buffer.assert_called_once()
+    # Verify the exact baseline homing frame was transmitted
+    mock_serial_instance.write.assert_called_once_with(b'@DRV,90,90,90*65\n')
+
+
+@patch('conductor_host.serial.Serial')
+def test_payload_size_security_drop(mock_serial_class, capsys):
+    """
+    Verifies >24 byte fail-fast drop policy to protect MCU SRAM.
+    """
+    mock_serial_instance = MagicMock()
+    conductor = ConductorHost(port="MOCK", baud=115200, timeout=0.5)
+    conductor.ser = mock_serial_instance
+
+    # 1. Execute an intentionally oversized artificial payload
+    # (e.g., simulating a float leakage bug bypassing integer casting)
+    success = conductor._transmit_and_wait(12345678, 12345678, 12345678)
+
+    # 2. Assertions
+    assert success is False
+    # The Transport Spy proves the script safely aborted without ever touching the USB wire
+    mock_serial_instance.write.assert_not_called()
     
-    # Verify it returns a 2-character uppercase Hex string
-    assert len(checksum) == 2
-    assert checksum.isupper()
-    # (In a real scenario, you would assert this against a known hand-calculated 
-    # CRC8 0x07 polynomial result to ensure absolute parity with the C++ side)
+    # Verify forensic logging
+    captured = capsys.readouterr()
+    assert "[SECURITY ALERT] Dropping oversized payload" in captured.out
+
 
 @patch('conductor_host.calculate_joint_angles')
-def test_nominal_transmission_pipeline(mock_ik_solver):
+@patch('conductor_host.serial.Serial')
+def test_kinematic_exception_heartbeat(mock_serial_class, mock_ik):
     """
-    Tests the 'Happy Path'. If the math succeeds, does the orchestrator
-    pack the string correctly and push it down the serial wire?
+    Verifies trapping math exceptions and sending keep-alives.
     """
-    # 1. Force our "fake" math solver to return a perfect set of angles
-    mock_ik_solver.return_value = {"base": 90, "shoulder": 45, "elbow": 135}
-    
-    # 2. Create a "fake" serial port that acts like the pyserial object
-    mock_serial = MagicMock()
-    
-    # 3. Execute the function with dummy coordinates
-    process_and_transmit(10.0, 10.0, 10.0, mock_serial)
-    
-    # 4. Generate the expected payload and checksum manually for comparison
-    expected_payload = "DRV,90,45,135"
-    expected_chk = calculate_crc8(expected_payload)
-    expected_frame = f"@{expected_payload}*{expected_chk}\n".encode('ascii')
-    
-    # 5. ASSERTION: Did the script write the exact byte string to the hardware?
-    mock_serial.write.assert_called_once_with(expected_frame)
+    mock_serial_instance = MagicMock()
+    mock_serial_instance.read.return_value = b'K'
+    conductor = ConductorHost(port="MOCK", baud=115200, timeout=0.5)
+    conductor.ser = mock_serial_instance
+    conductor.last_valid_angles = {"base": 90, "shoulder": 90, "elbow": 90}
 
-@patch('conductor_host.calculate_joint_angles')
-def test_safety_interlock_transmission_block(mock_ik_solver):
-    """
-    Tests the 'Interception'. If the math throws an envelope violation,
-    we must prove that the serial write command is NEVER executed.
-    """
-    # 1. Force our "fake" math solver to simulate a catastrophic boundary breach
-    mock_ik_solver.side_effect = WorkspaceEnvelopeViolation("Simulated out-of-bounds.")
-    
-    # 2. Create a "fake" serial port
-    mock_serial = MagicMock()
-    
-    # 3. Execute the function with the dangerous coordinates
-    process_and_transmit(30.0, 0.0, 0.0, mock_serial)
-    
-    # 4. ASSERTION: The absolute most critical test in the software.
-    # We mathematically assert that the Arduino was NEVER sent a command.
-    mock_serial.write.assert_not_called()
+    # 1. Force the IK solver to raise the workspace boundary violation
+    mock_ik.side_effect = WorkspaceEnvelopeViolation("Target out of bounds")
 
-# ---------------------------------------------------------
-# MODULE 4: DIRTY TRANSPORT & FUZZY TESTING
-# ---------------------------------------------------------
+    # 2. Execute the dispatch (e.g., commanding it to reach 30cm away)
+    conductor.dispatch_trajectory(30.0, 0.0, 0.0)
 
-@patch('conductor_host.calculate_joint_angles')
-def test_dirty_transport_timeout(mock_ik_solver, capsys):
-    """
-    DIRTY TRANSPORT: What happens if the USB cable is electrically noisy,
-    or the Arduino gets hit by an inductive motor spike and fails to send 
-    the acknowledgment character back?
-    """
-    # Math succeeds perfectly
-    mock_ik_solver.return_value = {"base": 90, "shoulder": 90, "elbow": 90}
-    
-    # Create the Spy, but this time, we sabotage its read capability
-    mock_serial = MagicMock()
-    
-    # Simulate a timeout (the readline() returns an empty byte string)
-    mock_serial.readline.side_effect = [b'', b''] # Simulate two consecutive timeouts and sees if anything outside the function is altered
+    # 3. Assertions
+    # The script should catch the error (not crash) and send the last known valid angle (90,90,90) 
+    # to feed the 3000ms watchdog without physically moving the arm.
+    mock_serial_instance.write.assert_called_once_with(b'@DRV,90,90,90*65\n')
 
-    # Capture the terminal logs (Forensics)
-    captured_logs = capsys.readouterr().out
-    
-    # ASSERTION: The script must not crash waiting for an ACK forever. 
-    # It must handle the empty read gracefully.
 
-    with pytest.raises(serial.SerialException, match="Microservice completely unresponsive."):
-        process_and_transmit(10.0, 10.0, 10.0, mock_serial)
+@patch('builtins.input', return_value='') # Mocks the user pressing ENTER on the terminal
+@patch('conductor_host.time.sleep')
+@patch('conductor_host.serial.Serial')
+def test_safe_hold_rearming_burst(mock_serial_class, mock_sleep, mock_input):
+    """
+    Verifies the 'H' Safety-Hold trap and 3-frame synchronization burst.
+    """
+    mock_serial_instance = MagicMock()
+    # Simulate the MCU sending an 'H' (Halt), followed by 3 ACKs during the re-arm burst
+    mock_serial_instance.read.side_effect = [b'H', b'H', b'H', b'K']
     
-    assert mock_serial.write.call_count == 1 # Ensures it attempted to send the coordinate frame
-    assert mock_serial.write.called #Ensures it attempted to send the coordinate frame
-    assert "" in captured_logs # Verifies we still logged the attempt
+    conductor = ConductorHost(port="MOCK", baud=115200, timeout=0.5)
+    conductor.ser = mock_serial_instance
+    conductor.last_valid_angles = {"base": 90, "shoulder": 45, "elbow": 135}
 
-@patch('conductor_host.calculate_joint_angles')
-def test_fuzzy_hardware_disconnect(mock_ik_solver, capsys):
-    """
-    FUZZY TESTING: What happens if the USB cable is violently yanked out 
-    of the laptop at the exact microsecond Python tries to write to it?
-    """
-    mock_ik_solver.return_value = {"base": 90, "shoulder": 90, "elbow": 90}
-    
-    mock_serial = MagicMock()
-    # Sabotage the write() function to simulate an immediate hardware disconnect
-    mock_serial.write.side_effect = serial.SerialException("Device disconnected")
-    
-    # Execute - We wrap it in a try/except in the test just in case, 
-    # but the process_and_transmit function should ideally catch or bubble it cleanly
-    try:
-        process_and_transmit(10.0, 10.0, 10.0, mock_serial)
-    except serial.SerialException:
-        pass # If we designed the orchestrator to bubble the error up to main()
-        
-    # ASSERTION: Did the system recognize the hardware failure without corrupting data?
-    assert mock_serial.write.called
+    # 1. Execute a transmission that receives an 'H'
+    success = conductor._transmit_and_wait(90, 45, 135)
 
-# ---------------------------------------------------------
-# MODULE 5: LOG THROTTLING & FORENSICS
-# ---------------------------------------------------------
-
-@patch('conductor_host.calculate_joint_angles')
-def test_forensic_logging_format(mock_ik_solver, capsys):
-    """
-    FORENSICS: Proves that the exact timestamped strings required by our 
-    security audit team are successfully printing to the console without spam.
-    """
-    mock_ik_solver.return_value = {"base": 180, "shoulder": 0, "elbow": 0}
-    mock_serial = MagicMock()
-    mock_serial.readline.return_value = b'K\n' # Standard Arduino acknowledgment
+    # 2. Assertions
+    assert success is False # The initial frame request failed
     
-    process_and_transmit(15.0, 5.0, 5.0, mock_serial)
+    # 1 initial write + 3 re-arming burst writes = 4 total writes
+    assert mock_serial_instance.write.call_count == 4
     
-    # Pull the exact text printed to the terminal
-    captured_logs = capsys.readouterr().out
-    
-    # Verify the forensic markers exist
-    assert "[TX]   Streaming Frame -> @DRV,180,0,0*" in captured_logs
-    assert "[RX]   Arduino Sentinel Replied -> K" in captured_logs
+    # Verify the burst used the locked holding angles
+    expected_sync_frame = b'@DRV,90,45,135*53\n'
+    mock_serial_instance.write.assert_called_with(expected_sync_frame)
