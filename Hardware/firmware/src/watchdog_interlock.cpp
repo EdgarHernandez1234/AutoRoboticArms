@@ -1,49 +1,49 @@
 #include "../include/watchdog_interlock.h"
 
-// Target compilation shielding for bare-metal register manipulation
+// Platform-Specific Millis Hook
 #ifdef __AVR_ATmega328P__
-#include <avr/io.h>
-#include <avr/wdt.h>
-#include <avr/interrupt.h>
-#endif
-
-/**
- * Low-level register implementation of our emergency shutdown procedures.
- * This binds our portable validation math to direct hardware pin controls.
- */
-#ifdef __AVR_ATmega328P__
-void configure_hardware_interlock_pins(uint8_t safety_pin) {
-    // Set the designated safety relay control pin as an OUTPUT
-    // Equivalent to pinMode(safety_pin, OUTPUT) but direct port manipulated
-    if (safety_pin >= 8 && safety_pin <= 13) {
-        DDRB |= (1 << (safety_pin - 8)); // Digital Pins 8-13 map onto Port B registers
-    } else if (safety_pin >= 0 && safety_pin <= 7) {
-        DDRD |= (1 << safety_pin);       // Digital Pins 0-7 map onto Port D registers
-    }
-
-    // INITIAL baseline STATE: Force pin HIGH to energize our safety connection tracks
-    if (safety_pin >= 8 && safety_pin <= 13) {
-        PORTB |= (1 << (safety_pin - 8));
-    } else if (safety_pin >= 0 && safety_pin <= 7) {
-        PORTD |= (1 << safety_pin);
-    }
-}
-
-void cut_actuator_electrical_rails(uint8_t safety_pin) {
-    // EMERGENCY ACTION: Instantly clear the bit to ground out the safety pin,
-    // dropping power/signal lines to our PCA9685 servo driver array.
-    if (safety_pin >= 8 && safety_pin <= 13) {
-        PORTB &= ~(1 << (safety_pin - 8));
-    } else if (safety_pin >= 0 && safety_pin <= 7) {
-        PORTD &= ~(1 << safety_pin);
-    }
-}
+    extern "C" uint32_t millis(void);
 #else
-// Mock declarations for native testing compilation on developer laptops
-void configure_hardware_interlock_pins(uint8_t safety_pin) {
-    (void)safety_pin; // Explicitly mutes the unused-parameter compiler warning
-}
-void cut_actuator_electrical_rails(uint8_t safety_pin) {
-    (void)safety_pin; // Clean, zero-overhead, zero-byte compilation footprint
-}
+    extern uint32_t get_simulated_millis(void);
+    #define millis() get_simulated_millis()
 #endif
+
+// Static Internal State (Encapsulated in C-API file scope)
+static uint32_t g_watchdog_timeout_ms = 3000;
+static uint32_t g_last_heartbeat_ms   = 0;
+static bool     g_is_tripped          = false;
+static bool     g_has_bootstrapped    = false;
+
+void watchdog_init(uint32_t timeout_ms) {
+    g_watchdog_timeout_ms = timeout_ms;
+    g_last_heartbeat_ms   = 0;
+    g_is_tripped          = false;
+    g_has_bootstrapped    = false;
+}
+
+bool watchdog_check(void) {
+    // Before the first valid frame arrives, stay dormant to allow host bootup
+    if (!g_has_bootstrapped) {
+        return true;
+    }
+
+    uint32_t current_ms = millis();
+    uint32_t delta_ms   = current_ms - g_last_heartbeat_ms;
+
+    if (delta_ms > g_watchdog_timeout_ms) {
+        g_is_tripped = true;
+        return false; // Trip the safety interlock
+    }
+
+    return true; // Healthy and within bounds
+}
+
+void watchdog_reset(void) {
+    g_last_heartbeat_ms = millis();
+    g_has_bootstrapped  = true;
+    g_is_tripped        = false;
+}
+
+bool watchdog_is_tripped(void) {
+    return g_is_tripped;
+}
