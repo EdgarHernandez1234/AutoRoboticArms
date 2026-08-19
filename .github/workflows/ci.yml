@@ -30,13 +30,14 @@ jobs:
         mkdir -p Hardware/firmware/build
 
         g++ -Wall -O2 -std=c++11 \
-          ./Hardware/firmware/tests/test_firmware_core.cpp \
+          ./Hardware/firmware/tests/test_integration_pipeline.cpp \
           ./Hardware/firmware/src/circular_buffer.cpp \
           ./Hardware/firmware/src/packet_parser.cpp \
+          ./Hardware/firmware/src/joint_actuator.cpp \ 
+          ./Hardware/firmware/src/twi_driver.cpp \
           ./Hardware/firmware/src/watchdog_interlock.cpp \
-          -I Hardware/firmware/include \
           -D RUNNING_ON_LAPTOP \
-          -o ./Hardware/firmware/build/test_firmware_core
+          -o ./Hardware/firmware/build/test_integration_pipeline
 
     - name: Execute Non-Blocking Micro-Clock Simulations
-      run: ./Hardware/firmware/build/test_firmware_core
+      run: ./Hardware/firmware/build/test_integration_pipeline

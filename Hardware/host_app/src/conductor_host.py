@@ -59,7 +59,7 @@ class ConductorHost:
         # Ensure strict integer casting
         payload = f"DRV,{int(base)},{int(shoulder)},{int(elbow)}"
         
-        # Jax's Security Gate: 24-Byte Ceiling Drop Policy
+        # 24-Byte Ceiling Drop Policy
         if len(payload) > 24:
             print(f"[SECURITY ALERT] Dropping oversized payload ({len(payload)} bytes): '{payload}'")
             return False
@@ -71,7 +71,7 @@ class ConductorHost:
         self.ser.write(frame.encode('ascii'))
         self.last_tx_time = time.time()
         
-        # Marcus's Closed-Loop Flow Control: Block for ACK
+        # Closed-Loop Flow Control: Block for ACK
         ack = self.ser.read(1).decode('ascii', errors='ignore')
         
         if not ack:
