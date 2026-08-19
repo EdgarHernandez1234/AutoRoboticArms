@@ -3,56 +3,52 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "./circular_buffer.h"
 
-// ⚡ Protocol ICD Constraints
-#define MAX_PAYLOAD_LEN 24 // Max ASCII characters between '@' and '*'
-#define MAX_JOINTS      4  // Supported kinematic servo channels per command
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-// 🎛️ FSM States
+#define MAX_PACKET_LENGTH   32
+#define MAX_ROBOTIC_JOINTS  3
+
 typedef enum {
-    STATE_WAIT_FOR_START = 0, // Idling, scanning for '@' header token
-    STATE_ACCUMULATE_PAYLOAD, // Stash payload chars & calculate rolling XOR checksum
-    STATE_READ_CHECKSUM,      // Read 2 ASCII Hex checksum characters following '*'
-    STATE_VALIDATE_EXECUTE    // Checksum parity match and in-place tokenization
-} ParseState;
+    PARSE_IN_PROGRESS,
+    PARSE_SUCCESS,
+    PARSE_ERROR_FORMAT,
+    PARSE_ERROR_CHECKSUM
+} ParseStatus;
 
-// 🚦 Process Status Return Codes
 typedef enum {
-    PARSE_BUSY = 0,          // Frame in progress, waiting for more bytes
-    PARSE_SUCCESS_FRAME,     // Valid frame decoded and checksum verified
-    PARSE_ERROR_CHECKSUM,    // Frame complete, but XOR checksum mismatched
-    PARSE_ERROR_OVERFLOW,    // Payload exceeded MAX_PAYLOAD_LEN before '*'
-    PARSE_ERROR_FORMAT       // Invalid ASCII hex character in checksum tail
-} ParseResult;
+    STATE_WAIT_FOR_START,       // Waiting for '@' marker
+    STATE_ACCUMULATE_PAYLOAD,   // Reading payload bytes until '*'
+    STATE_WAIT_FOR_CHECKSUM,    // Reading 2 hex checksum characters
+    STATE_WAIT_FOR_NEWLINE      // Waiting for '\n' terminator
+} ParserFSMState;
 
-// Decoded Command Data Transfer Container
 typedef struct {
-    char command[8];             // e.g., "DRV"
-    uint8_t angles[MAX_JOINTS];  // Parsed servo angles (0 - 180 deg)
-    uint8_t angle_count;         // Number of valid joint angles parsed
-    bool valid;                  // True if checksum and formatting passed
-} ParsedCommand;
-
-// Stateful Parser Memory Layout
-typedef struct {
-    ParseState state;                  // Current FSM state
-    char payload_buf[MAX_PAYLOAD_LEN + 1]; // Local static payload buffer
-    uint8_t payload_idx;               // Write pointer for payload buffer
-    uint8_t calculated_checksum;       // Rolling bitwise XOR parity accumulator
-    char checksum_hex[3];              // Storage for 2 ASCII Hex characters + null
-    uint8_t checksum_idx;              // Index tracker for hex tail read
-    
-    // Diagnostic Metrics
-    uint16_t valid_packets;            // Successfully parsed frames counter
-    uint16_t corrupted_packets;        // Dropped frames counter (checksum fail)
-    uint16_t overflow_packets;         // Dropped frames counter (length overrun)
+    char           payload_buffer[MAX_PACKET_LENGTH];
+    uint8_t        payload_index;
+    char           checksum_buffer[3];
+    uint8_t        checksum_index;
+    ParserFSMState state;
+    uint8_t        parsed_angles[MAX_ROBOTIC_JOINTS];
 } PacketParser;
 
-// Public API Surface
+/**
+ * @brief Initializes or resets the parser state machine.
+ */
 void packet_parser_init(PacketParser* parser);
-void packet_parser_reset(PacketParser* parser);
-ParseResult packet_parser_process_byte(PacketParser* parser, uint8_t byte, ParsedCommand* out_cmd);
-ParseResult packet_parser_process_buffer(PacketParser* parser, CircularBuffer* cb, ParsedCommand* out_cmd);
+
+/**
+ * @brief Ingests exactly 1 raw ASCII byte into the parser FSM.
+ * @param parser Pointer to the PacketParser instance.
+ * @param byte Incoming character from RingBuffer / UART.
+ * @return ParseStatus reflecting the outcome of processing this byte.
+ */
+ParseStatus packet_parser_process_byte(PacketParser* parser, uint8_t byte);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // PACKET_PARSER_H

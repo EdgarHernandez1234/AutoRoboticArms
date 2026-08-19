@@ -4,23 +4,57 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-// ⚡ Hardware Capacity Constants
-#define CIRCULAR_BUFFER_CAPACITY 32
-#define CIRCULAR_BUFFER_MASK     (CIRCULAR_BUFFER_CAPACITY - 1) // 0x1F (31 in decimal)
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-// Lock-Free Single-Producer Single-Consumer (SPSC) Ring Buffer Struct
+#define BUFFER_SIZE 32
+#define BUFFER_MASK (BUFFER_SIZE - 1) // 0x1F (31) for single-cycle bitwise wrapping
+
 typedef struct {
-    uint8_t buffer[CIRCULAR_BUFFER_CAPACITY]; // 32-byte static memory array
-    volatile uint8_t head;               // Write pointer (Updated by ISR/Producer)
-    volatile uint8_t tail;               // Read pointer (Updated by Main Loop/Consumer)
+    uint8_t buffer[BUFFER_SIZE];
+    volatile uint8_t head;
+    volatile uint8_t tail;
 } CircularBuffer;
 
-// Public API Surface
-void circular_buffer_init(CircularBuffer* rb);
-bool circular_buffer_enqueue(CircularBuffer* rb, uint8_t byte);
-bool circular_buffer_dequeue(CircularBuffer* rb, uint8_t* byte_ptr);
-uint8_t circular_buffer_available(const CircularBuffer* rb);
-bool circular_buffer_is_full(const CircularBuffer* rb);
-bool circular_buffer_is_empty(const CircularBuffer* rb);
+/**
+ * @brief Initializes or clears the circular ring buffer.
+ */
+void circular_buffer_init(CircularBuffer* cb);
+
+/**
+ * @brief Pushes a single byte into the ring buffer (e.g. from UART ISR).
+ * @param cb Pointer to CircularBuffer instance.
+ * @param data Byte to write.
+ * @return true if written successfully, false if buffer was full (overflow).
+ */
+bool circular_buffer_write(CircularBuffer* cb, uint8_t data);
+
+/**
+ * @brief Pops/reads a single byte from the ring buffer.
+ * @param cb Pointer to CircularBuffer instance.
+ * @param data Pointer to store the extracted byte.
+ * @return true if a byte was read, false if the buffer was empty.
+ */
+bool circular_buffer_read(CircularBuffer* cb, uint8_t* data);
+
+/**
+ * @brief Returns true if the buffer has no readable data.
+ */
+bool circular_buffer_is_empty(const CircularBuffer* cb);
+
+/**
+ * @brief Returns true if the buffer cannot accept more data.
+ */
+bool circular_buffer_is_full(const CircularBuffer* cb);
+
+/**
+ * @brief Returns the number of unread bytes in the buffer.
+ */
+uint8_t circular_buffer_available(const CircularBuffer* cb);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // CIRCULAR_BUFFER_H

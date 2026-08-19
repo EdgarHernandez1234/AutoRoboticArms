@@ -2,65 +2,39 @@
 #define WATCHDOG_INTERLOCK_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
-// HARDWARE WATCHDOG SPECIFICATION CONSTANTS
-#define WATCHDOG_TIMEOUT_MS 3000
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-class WatchdogInterlock {
-private:
-    uint32_t last_heartbeat_timestamp;
-    bool system_tripped;
-    uint8_t safety_relay_pin;
+/**
+ * @brief Initializes the watchdog interlock with a specified timeout limit.
+ * @param timeout_ms Safety window duration (e.g., 3000 ms).
+ */
+void watchdog_init(uint32_t timeout_ms);
 
-public:
-    // 1. HARDWARE BINDING: Assigns physical interlock control pins
-    void init(uint8_t pin) {
-        safety_relay_pin = pin;
-        system_tripped = false;
-        last_heartbeat_timestamp = 0;
-    }
+/**
+ * @brief Checks if the communication heartbeat has expired.
+ * Non-blocking check evaluated on every pass of the main super-loop.
+ * @return true if communication is healthy (safe), false if timed out (tripped).
+ */
+bool watchdog_check(void);
 
-    // 2. COUNTER RESET (WDT Kicking): Called when a valid verified message frame lands
-    void reset_timer(uint32_t current_time_ms) {
-        last_heartbeat_timestamp = current_time_ms;
-        
-        // Recover cleanly if we were previously locked down and communications re-align
-        if (system_tripped) {
-            system_tripped = false;
-            // Write to physical hardware registers to restore connection tracks here later
-        }
-    }
+/**
+ * @brief Kicks/feeds the watchdog timer upon receiving a valid, verified packet.
+ * Resets the internal heartbeat timestamp to the current millisecond.
+ */
+void watchdog_reset(void);
 
-    // 3. CONTINUOUS TIMING CHECK: Evaluates time delta drift inside main execution loop
-    bool evaluate_state(uint32_t current_time_ms) {
-        // Guard against premature checking prior to the first valid message landing
-        if (last_heartbeat_timestamp == 0) {
-            return true;
-        }
+/**
+ * @brief Returns whether the watchdog has latched into a tripped state.
+ * @return true if currently tripped.
+ */
+bool watchdog_is_tripped(void);
 
-        // Calculate exact time elapsed since the last valid host packet injection
-        uint32_t time_elapsed = current_time_ms - last_heartbeat_timestamp;
-
-        if (time_elapsed > WATCHDOG_TIMEOUT_MS) {
-            if (!system_tripped) {
-                trigger_emergency_shutdown();
-            }
-            return false;
-        }
-        return true;
-    }
-
-    // 4. EMERGENCY SYSTEM ISOLATION: Cuts torque limits immediately
-    void trigger_emergency_shutdown() {
-        system_tripped = true;
-        // CRITICAL ACTION: Physical manipulation of output pins or I2C registers 
-        // to immediately cut ground rails or drop servo torque to zero occurs here.
-    }
-
-    // 5. OBSERVABILITY INTERFACE: Exposes active health flags to diagnostics channels
-    bool is_tripped() const {
-        return system_tripped;
-    }
-};
+#ifdef __cplusplus
+}
+#endif
 
 #endif // WATCHDOG_INTERLOCK_H
