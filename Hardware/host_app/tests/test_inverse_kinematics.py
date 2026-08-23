@@ -72,11 +72,11 @@ def test_floating_point_precision_clamping():
     """
     Precision Check: Asserts that our internal float-clamping guard prevents
     rounding drift from throwing a math domain error when links are fully stretched.
-    Total maximum reach is exactly 22.0cm (12cm + 10cm).
+    Total maximum reach is exactly 22.0cm (12cm + 10cm) but safety bounds are set at 21.5 cm.
     """
     # Placing target right on the knife-edge boundary of the reach
     try:
-        result = calculate_joint_angles(22.0, 0.0, 0.0)
+        result = calculate_joint_angles(21.5, 0.0, 0.0)
         
         # Verify the calculations return valid, clean numeric parameters
         assert isinstance(result["elbow"], int)
