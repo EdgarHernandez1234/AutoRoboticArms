@@ -1,77 +1,83 @@
+import os
+import sys
+import tempfile
+import time
 import pytest
 from fastapi.testclient import TestClient
-from orchestrator_node import app, is_serial_bus_nominal, shared_movement_queue
-
-# Initialize the mock client to simulate web traffic to your API
+host_main = os.path.abspath(os.path.join(os.path.dirname(__file__), "../orchestrator_node"))
+sys.path.append(host_main)
+import orchestrator_node
+from orchestrator_node import app, waypoint_queue
 
 client = TestClient(app)
 
 @pytest.fixture(autouse=True)
-def clean_system_state_deck():
-    """Guarantees pristine, un-contaminated memory metrics before every single assertion."""
-    is_serial_bus_nominal.set()
-    shared_movement_queue.clear()
+def clean_test_environment():
+    """Swaps the production database for an isolated temporary SQLite file."""
+    fd, temp_db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    
+    # Store original and inject test database manager
+    original_db = orchestrator_node.db
+    orchestrator_node.db = orchestrator_node.DatabaseManager(db_path=temp_db_path)
+    waypoint_queue.clear()
+    
     yield
+    
+    # Teardown: Shutdown background thread and purge temporary files
+    orchestrator_node.db.shutdown()
+    orchestrator_node.db = original_db
+    for ext in ["", "-wal", "-shm"]:
+        if os.path.exists(temp_db_path + ext):
+            os.remove(temp_db_path + ext)
 
-def test_diagnostics_health_route():
+def test_health_endpoint():
     response = client.get("/api/v1/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ONLINE"
-    assert response.json()["serial_bus_nominal"] is True
 
-def test_nominal_input_precision_caching():
-    payload = {"joint_id": 4, "target_angle": 125.3}
-    response = client.post("/api/v1/trajectory/step", json=payload)
-    assert response.status_code == 202
-    assert len(shared_movement_queue) == 1
-
-def test_floating_point_epsilon_validation_pass():
-    """Proves that eager epsilon sanitization accepts and normalizes binary IEEE-754 tail noise."""
-    payload = {"joint_id": 1, "target_angle": 45.2000000001}
-    response = client.post("/api/v1/trajectory/step", json=payload)
-    assert response.status_code == 202
+def test_nominal_waypoint_ingestion_and_logging():
+    payload = {"joint_1": 90, "joint_2": 45, "joint_3": 180}
+    response = client.post("/api/v1/waypoint", json=payload)
     
-    cached_command = shared_movement_queue.pop()
-    assert cached_command["target_angle"] == 45.2
-
-def test_pydantic_epsilon_precision_rejection():
-    """Verifies that precision attacks are captured by middleware and return mechatronic metadata."""
-    malicious_payload = {"joint_id": 1, "target_angle": 45.2359182391}
-    response = client.post("/api/v1/trajectory/step", json=malicious_payload)
+    assert response.status_code == 200
+    assert response.json()["status"] == "ENQUEUED"
     
-    assert response.status_code == 422
-    assert response.json()["status"] == "REJECTED"
-    assert response.json()["error_matrix"][0]["mechatronic_tag"] == "GEOMETRIC_WORKSPACE_BREACH"
-    assert is_serial_bus_nominal.is_set()
-
-def test_pydantic_integer_overflow_rejection():
-    """Verifies that invalid or out-of-bounds joint registers are dropped with custom tags."""
-    overflow_payload = {"joint_id": 99, "target_angle": 90.0}
-    response = client.post("/api/v1/trajectory/step", json=overflow_payload)
+    # Allow the background database worker thread 600ms to micro-batch to disk
+    time.sleep(0.6)
+    
+    logs = orchestrator_node.db.get_recent_telemetry()
+    assert len(logs) >= 2  # Expecting both INGRESS and DISPATCH records
+    
+    # ORDER BY id DESC means logs[0] is the most recent (DISPATCH)
+    assert logs[0][7] == "DISPATCH"
+    
+    # logs[1] is the initial API ingestion (INGRESS)
+    assert logs[1][7] == "INGRESS"
+    assert logs[1][2] == 90  # joint_1 column check on the INGRESS row
+    
+def test_pydantic_boundary_rejection():
+    payload = {"joint_1": 190, "joint_2": -5, "joint_3": 90}
+    response = client.post("/api/v1/waypoint", json=payload)
     
     assert response.status_code == 422
-    assert response.json()["status"] == "REJECTED"
-    assert response.json()["error_matrix"][0]["mechatronic_tag"] == "PCA9685_REGISTER_OVERFLOW"
-    assert is_serial_bus_nominal.is_set()
+    assert len(waypoint_queue) == 0
 
-def test_workspace_envelope_violation_lockout():
-    """Verifies that physical envelope breaches trigger an HTTP 400 and flip the lockout breaker."""
-    dangerous_payload = {"joint_id": 2, "target_angle": 185.0}
-    response = client.post("/api/v1/trajectory/step", json=dangerous_payload)
-    
-    assert response.status_code == 400
-    assert "Workspace envelope breached" in response.json()["detail"]
-    assert not is_serial_bus_nominal.is_set()
-    assert len(shared_movement_queue) == 0
-
-def test_backpressure_saturation_limit():
-    """Spams the bounded custom queue class object to verify it drops traffic via 429 errors when full."""
-    for i in range(50):
-        shared_movement_queue.push({"joint_id": 1, "target_angle": 90.0})
+def test_queue_saturation_protection():
+    # Artificially inflate the queue to its 10,000 item maximum
+    for _ in range(10000):
+        waypoint_queue.append({"joint_1": 0, "joint_2": 0, "joint_3": 0})
         
-    assert len(shared_movement_queue) == 50
+    payload = {"joint_1": 90, "joint_2": 90, "joint_3": 90}
+    response = client.post("/api/v1/waypoint", json=payload)
     
-    payload = {"joint_id": 1, "target_angle": 90.0}
-    response = client.post("/api/v1/trajectory/step", json=payload)
-    assert response.status_code == 429
-    assert "backpressure capacity saturated" in response.json()["detail"]
+    assert response.status_code == 503
+    assert "Active queue backlog full" in response.json()["detail"]
+
+def test_telemetry_read_gateway():
+    client.post("/api/v1/waypoint", json={"joint_1": 10, "joint_2": 20, "joint_3": 30})
+    time.sleep(0.6)
+    
+    response = client.get("/api/v1/telemetry")
+    assert response.status_code == 200
+    assert len(response.json()["telemetry_logs"]) > 0
