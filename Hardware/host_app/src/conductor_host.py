@@ -78,7 +78,7 @@ class ConductorHost:
             print("[ALERT] Serial Read Timeout (b''). Communication drop detected.")
             self.handle_safety_halt()
             return False
-            
+        print(f"[RX]{ack}")
         if ack == 'K':
             # Nominal execution: update state cache
             self.last_valid_angles = {"base": base, "shoulder": shoulder, "elbow": elbow}
