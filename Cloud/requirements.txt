@@ -1,0 +1,23 @@
+# -----------------------------------------------------------------------------
+# Production & Staging Dependency Manifest
+# -----------------------------------------------------------------------------
+
+# Web Gateway & Asynchronous Event Engine
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+websockets==12.0
+
+# Binary Schema Serialization
+protobuf==5.29.3
+
+# Relational Persistence Tier (SQLite WAL)
+sqlmodel==0.0.22
+sqlalchemy==2.0.35
+pydantic==2.9.2
+
+# Serial Hardware Transport
+pyserial==3.5
+
+# Test Harness
+httpx==0.27.2
+pytest==8.3.3
