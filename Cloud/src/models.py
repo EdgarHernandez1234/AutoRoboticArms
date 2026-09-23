@@ -1,9 +1,7 @@
-# models.py
-# AutoRoboticArms Option C Subsystem - Hardened Relational Hybrid Schema Declarations
+
 from datetime import datetime, timezone
 from typing import Optional
 from sqlmodel import Field, SQLModel
-
 
 class NodeConfiguration(SQLModel, table=True):
     """
