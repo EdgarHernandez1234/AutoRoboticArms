@@ -10,8 +10,8 @@ from botocore.config import Config
 from botocore.exceptions import ClientError, BotoCoreError
 from sqlmodel import Session, select
 
-from src.database_manager import get_engine
-from src.models import TelemetryIngressQueue
+from .database_manager import get_engine
+from .models import TelemetryIngressQueue
 
 # Configure module logging
 logging.basicConfig(level=logging.INFO)
