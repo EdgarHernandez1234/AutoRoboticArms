@@ -1,0 +1,77 @@
+services:
+  control-plane:
+    image: autoroboticarms-cloud:step10.1
+    container_name: autorobot-control-plane
+    restart: unless-stopped
+    ports:
+      - "8050:8050"
+    environment:
+      - PORT=8050
+      - TELEMETRY_STORAGE_DIR=/app/storage
+    volumes:
+      - ./storage:/app/storage
+    networks:
+      - telemetry-net
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8050/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  cloud-sync:
+    image: autoroboticarms-cloud:step10.1
+    container_name: autorobot-cloud-sync
+    restart: unless-stopped
+    depends_on:
+      control-plane:
+        condition: service_healthy
+    environment:
+      - BUCKET_NAME=${BUCKET_NAME}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+      - TELEMETRY_STORAGE_DIR=/app/storage
+    volumes:
+      - ./storage:/app/storage
+      - ~/.aws:/home/appuser/.aws:ro
+    networks:
+      - telemetry-net
+    entrypoint: ["python3", "-c"]
+    command:
+      - |
+        import time, os, logging
+        from sqlmodel import SQLModel
+        from src.database_manager import get_engine
+        from src.cloud_sync import CloudSyncWorker
+        import src.models  # Registers TelemetryIngressQueue with SQLModel metadata
+
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
+        logger = logging.getLogger("cloud_sync_daemon")
+        logger.info("Initializing containerized CloudSyncWorker daemon...")
+
+        engine = get_engine()
+        SQLModel.metadata.create_all(engine)
+        logger.info("Database schema verified and active.")
+
+        bucket = os.environ.get("BUCKET_NAME")
+        if not bucket:
+            logger.error("FATAL: BUCKET_NAME environment variable not defined.")
+            exit(1)
+
+        worker = CloudSyncWorker(
+            bucket_name=bucket,
+            batch_size_threshold=5,
+            batch_time_threshold_sec=10.0,
+            region_name=os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+        )
+
+        logger.info(f"CloudSyncWorker loop running. Monitoring bucket: {bucket}")
+        while True:
+            try:
+                worker.sync_cycle()
+            except Exception as e:
+                logger.error(f"Unexpected error during sync cycle: {e}")
+            time.sleep(2.0)
+
+networks:
+  telemetry-net:
+    driver: bridge
