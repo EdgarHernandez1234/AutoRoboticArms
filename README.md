@@ -1,8 +1,8 @@
 # AutoRoboticArms
 
-## Refined Idea: A simply made robotic arms being able to function properly with an ai being able to control them from within my homelab. Eventually I will incorperate an addtional arm. This Project is meant to expand my knowledge on Embedded Systems, Software, and Cloud. Because interdisciplinary knowledge is cool.
+## Refined Idea: A simply made robotic arm being able to function properly with an ai being able to control them from within my homelab. Eventually I will incorperate an addtional arm. This Project is meant to expand my knowledge on Embedded Systems, Software, and Cloud. Because interdisciplinary knowledge is cool.
 
-## Current Goal For the week: Complete the Ubuntu Server Setup for Software Layer
+## Current Goal For the week: Finish writing the Servo code for arm
 
 Starting May 16 2026
 
@@ -36,3 +36,15 @@ July 20256
 
 Aug 2026
 - Completed Armoring Control Plane for Cloud Layer
+- Ordered the hardware components required for the robotic arm
+- Complete the software layer environment until hardware arrives
+
+Sep 2026
+- Hardware components arrived
+- Started building the robotic arm
+- Started on the wiring
+- Started on servo control
+
+Oct 2026
+- Finished the Cloud layer
+- 
