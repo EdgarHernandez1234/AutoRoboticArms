@@ -24,7 +24,7 @@ set(FIRMWARE_CORE_SOURCES
 # 🧪 PHASE D: Software-in-the-Loop (SIL) Integration Pipeline Target
 # -----------------------------------------------------------------------------
 add_executable(test_integration_pipeline
-    firmware/src/test_integration_pipeline.cpp
+    firmware/tests/test_integration_pipeline.cpp
     ${FIRMWARE_CORE_SOURCES}
 )
 
