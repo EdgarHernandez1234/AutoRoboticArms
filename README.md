@@ -2,7 +2,7 @@
 
 ## Refined Idea: A simply made robotic arm being able to function properly with an ai being able to control them from within my homelab. Eventually I will incorperate an addtional arm. This Project is meant to expand my knowledge on Embedded Systems, Software, and Cloud. Because interdisciplinary knowledge is cool.
 
-## Current Goal For the week: Finish writing the Servo code for arm
+## Current Goal For the week: work on the software layer
 
 Starting May 16 2026
 
@@ -47,4 +47,4 @@ Sep 2026
 
 Oct 2026
 - Finished the Cloud layer
-- 
+- Finished programming the servos
