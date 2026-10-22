@@ -50,7 +50,7 @@ jobs:
           pip install -r requirements.txt
           
           # Execute pytest explicitly targeting the tests folder
-          pytest tests/ -v
+          pytest test_cloud_sync.py test_conductor.py test_control_plane.py test_database.py test_protobuf_serialization.py -v
 
   # =====================================================================
   # JOB 3: OPTION B & C (CONTAINERIZATION HARDENING)
