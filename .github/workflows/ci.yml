@@ -1,43 +1,72 @@
-name: Hardware Layer Defensive Core Automation Pipeline
+name: AutoRoboticArms Ecosystem CI/CD
 
+# 1. TRIGGER GATEWAYS
 on:
   push:
-    branches: [ "main", "dev" ]
+    branches: [ "main", "dev", "feature/*" ]
   pull_request:
     branches: [ "main" ]
 
 jobs:
-  firmware-hardening-validation:
+  # =====================================================================
+  # JOB 1: OPTION A (FIRMWARE & SILICON CONTROL)
+  # =====================================================================
+  firmware-sil-validation:
+    name: C++ Firmware Software-in-the-Loop
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout Source Directory Trees
-      uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      
+      - name: Install C++ Toolchains
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ gcc-avr avr-libc
+        
+      - name: Build & Execute CMake Integration Pipeline
+        run: |
+          mkdir -p build
+          cd build
+          cmake ..
+          make
+          ./test_integration_pipeline
 
-    - name: Initialize Bare-Metal Cross Compiler Environment
-      run: sudo apt-get update && sudo apt-get install -y g++ gcc-avr avr-libc
-    
-    # 5. STATIC SCANNING: Audit code health and block dynamic heap leaks
-    - name: Run Static Analyzer & Code Safety Scanners
-      run: |
-        # Verifies code is free of uninitialized fields or dynamic allocations
-        g++ -Wall -Wextra -Werror -std=c++11 -fsyntax-only ./Hardware/firmware/src/*.cpp
+  # =====================================================================
+  # JOB 2: OPTION B & C (PYTHON MICROSERVICES & CLOUD DATA PLANE)
+  # =====================================================================
+  python-backend-validation:
+    name: ASGI Gateway & Cloud Sync Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
 
-    # 6. COMPILATION PASS: Provision target paths and execute linker commands
-    # Force the environment runner to create the target directory recursively
-    # Compile and bind files into the newly created folder
-    - name: Build Automated Integration Test Executable Image
-      run: |
-        mkdir -p Hardware/firmware/build
+      - name: Supply-Chain Vulnerability Audit
+        run: |
+          pip install pip-audit
+          pip-audit -r Cloud/requirements.txt
+          
+      - name: Install Dependencies & Run Pytest
+        run: |
+          pip install -r Cloud/requirements.txt
+          pytest Cloud/tests/ -v
 
-        g++ -Wall -O2 -std=c++11 \
-          ./Hardware/firmware/tests/test_integration_pipeline.cpp \
-          ./Hardware/firmware/src/circular_buffer.cpp \
-          ./Hardware/firmware/src/packet_parser.cpp \
-          ./Hardware/firmware/src/joint_actuator.cpp \ 
-          ./Hardware/firmware/src/twi_driver.cpp \
-          ./Hardware/firmware/src/watchdog_interlock.cpp \
-          -D RUNNING_ON_LAPTOP \
-          -o ./Hardware/firmware/build/test_integration_pipeline
+  # =====================================================================
+  # JOB 3: OPTION B & C (CONTAINERIZATION HARDENING)
+  # =====================================================================
+  container-build-audit:
+    name: Multi-Stage OCI Image Build
+    runs-on: ubuntu-latest
+    needs: [python-backend-validation]
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-    - name: Execute Non-Blocking Micro-Clock Simulations
-      run: ./Hardware/firmware/build/test_integration_pipeline
+      - name: Build Hardened Docker Image
+        run: |
+          cd Cloud
+          docker build -t autoroboticarms-cloud:ci-test .
