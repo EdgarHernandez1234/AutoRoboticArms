@@ -13,18 +13,18 @@ include_directories(firmware/include)
 
 # Group all of the core Phase C & Phase D Flat C-API source files
 set(FIRMWARE_CORE_SOURCES
-    firmware/src/circular_buffer.cpp
-    firmware/src/packet_parser.cpp
-    firmware/src/joint_actuator.cpp
-    firmware/src/watchdog_interlock.cpp
-    firmware/src/twi_driver.cpp
+    firmware/src/tests/circular_buffer.cpp
+    firmware/src/tests/packet_parser.cpp
+    firmware/src/tests/joint_actuator.cpp
+    firmware/src/tests/watchdog_interlock.cpp
+    firmware/src/tests/twi_driver.cpp
 )
 
 # -----------------------------------------------------------------------------
 #  PHASE D: Software-in-the-Loop (SIL) Integration Pipeline Target
 # -----------------------------------------------------------------------------
 add_executable(test_integration_pipeline
-    firmware/src/test_integration_pipeline.cpp
+    firmware/src/tests/test_integration_pipeline.cpp
     ${FIRMWARE_CORE_SOURCES}
 )
 

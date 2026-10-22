@@ -27,7 +27,7 @@ jobs:
           cd build
           cmake ..
           make
-          ../tests/test_integration_pipeline
+          ./test_integration_pipeline
 
   # =====================================================================
   # JOB 2: OPTION B & C (PYTHON MICROSERVICES & CLOUD DATA PLANE)
