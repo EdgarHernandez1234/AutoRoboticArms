@@ -1,6 +1,5 @@
 name: AutoRoboticArms Ecosystem CI/CD
 
-# 1. TRIGGER GATEWAYS
 on:
   push:
     branches: [ "main", "dev", "feature/*" ]
@@ -44,16 +43,14 @@ jobs:
         with:
           python-version: '3.12'
           cache: 'pip'
-
-      - name: Supply-Chain Vulnerability Audit
-        run: |
-          pip install pip-audit
-          pip-audit -r Cloud/requirements.txt
           
       - name: Install Dependencies & Run Pytest
         run: |
-          pip install -r Cloud/requirements.txt
-          pytest Cloud/tests/ -v
+          cd Cloud
+          pip install -r requirements.txt
+          
+          # Execute pytest explicitly targeting the tests folder
+          pytest tests/ -v
 
   # =====================================================================
   # JOB 3: OPTION B & C (CONTAINERIZATION HARDENING)

@@ -18,6 +18,7 @@ set(FIRMWARE_CORE_SOURCES
     firmware/tests/joint_actuator.cpp
     firmware/tests/watchdog_interlock.cpp
     firmware/tests/twi_driver.cpp
+    firmware/tests/test_integration_pipeline.cpp
 )
 
 # -----------------------------------------------------------------------------
