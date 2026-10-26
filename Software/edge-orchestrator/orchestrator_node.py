@@ -249,7 +249,7 @@ async def post_cartesian(target: CartesianRequest):
         angles = calculate_joint_angles(target.x, target.y, target.z)
     except WorkspaceEnvelopeViolation as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=422,
             detail=f"GEOMETRIC_WORKSPACE_BREACH: {str(exc)}"
         )
 
