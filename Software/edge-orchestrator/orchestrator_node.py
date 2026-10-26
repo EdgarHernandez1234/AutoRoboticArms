@@ -1,250 +1,303 @@
+"""
+orchestrator_node.py
+Hardened Local Microservices Node with Real Hardware Serial Loop,
+Cartesian Spatial Kinematic Ingress, Slew-Rate Limiting, and WAL Persistence.
+"""
+
 import os
 import time
-import threading
-import collections
-from contextlib import asynccontextmanager
-from typing import Optional 
 import serial
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+import threading
+from collections import deque
+from contextlib import asynccontextmanager
+from typing import Optional, List, Dict, Any
+
+from fastapi import FastAPI, HTTPException, status
+from pydantic import BaseModel, Field, ConfigDict
+
 from database_manager import DatabaseManager
+from kinematics import calculate_joint_angles, WorkspaceEnvelopeViolation
 
-# =====================================================================
-# CONFIGURATION & GLOBAL STATE
-# =====================================================================
-SERIAL_PORT = os.getenv("SERIAL_PORT", "/dev/tty.usbmodem14101") # /dev/tty.usbmodem14101 for mac or /dev/ttyACM0 for linux
-BAUD_RATE = 115200
-WATCHDOG_KEEPALIVE_INTERVAL = 1.5  # Seconds (Hardware trips at 3.0s)
-LOOP_FREQUENCY_HZ = 20.0
-CYCLE_INTERVAL = 1.0 / LOOP_FREQUENCY_HZ  # 0.05s (50 ms)
+# --- CONFIGURATION CONSTANTS ---
+SERIAL_PORT = os.getenv("SERIAL_PORT", "/dev/ttyACM0")
+BAUD_RATE = int(os.getenv("BAUD_RATE", "115200"))
+QUEUE_MAX_CAPACITY = 10000
+WATCHDOG_TIMEOUT_SEC = 3.0
+KEEP_ALIVE_INTERVAL_SEC = 1.5
+DB_PATH = os.getenv("DB_PATH", "telemetry.db")
+SLEW_RATE_MAX_DELTA_DEG = 2  # Max degree step per 20ms tick (~100 deg/s)
 
-# Cross-thread FIFO queue bounded to prevent memory runaway
-waypoint_queue = collections.deque(maxlen=10000)
+# --- THREAD-SAFE CONCURRENCY STATE ---
+queue_lock = threading.Lock()
+waypoint_queue: deque = deque(maxlen=QUEUE_MAX_CAPACITY)
 
-# Global telemetry manager backed by SQLite WAL
-db = DatabaseManager(db_path="telemetry.db")
-
-# Thread synchronization events
-is_serial_connected = threading.Event()
+hardware_state_lock = threading.Lock()
+last_known_angles = [90, 90, 90]
+target_joint_angles = [90, 90, 90]
+is_serial_connected = False
+interlock_tripped = False
 shutdown_event = threading.Event()
 
-# Holding cache for keep-alive heartbeats and watchdog recovery
-last_commanded_angles = {"joint_1": 90, "joint_2": 90, "joint_3": 90}
-last_commanded_lock = threading.Lock()
+db_manager: Optional[DatabaseManager] = None
 
 
-# =====================================================================
-# FRAME COMPOSER & VALIDATOR (Vulnerability 6 Mitigation)
-# =====================================================================
-def build_option_a_frame(joint_1: int, joint_2: int, joint_3: int) -> bytes:
-    """
-    Constructs an Hardware Layer UART frame conforming to strict framing:
-    Payload format: DRV,<j1>,<j2>,<j3>
-    Frame format:   @<payload>*<CHK>\n
-    Total payload body must not exceed 24 bytes.
-    """
-    # Enforce integer clamping (0 - 180)
-    j1 = max(0, min(180, int(round(joint_1))))
-    j2 = max(0, min(180, int(round(joint_2))))
-    j3 = max(0, min(180, int(round(joint_3))))
+# --- PYDANTIC SCHEMAS ---
+class WaypointRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    joint_1: int = Field(..., ge=0, le=180, description="Base Yaw angle (0-180)")
+    joint_2: int = Field(..., ge=0, le=180, description="Shoulder Pitch angle (0-180)")
+    joint_3: int = Field(..., ge=0, le=180, description="Elbow Pitch angle (0-180)")
 
-    payload = f"DRV,{j1},{j2},{j3}"
-    
-    # Pre-flight length assertion (Microcontroller MAX_PAYLOAD_LEN = 24)
-    if len(payload.encode("ascii")) > 24:
-        raise ValueError(f"Payload '{payload}' overshoots 24-byte circular buffer limit.")
 
-    # Compute rolling 8-bit XOR checksum
+class CartesianRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    x: float = Field(..., description="X coordinate in cm")
+    y: float = Field(..., description="Y coordinate in cm")
+    z: float = Field(..., description="Z coordinate in cm")
+
+
+# --- FRAME SERIALIZATION ---
+def build_option_a_frame(j1: int, j2: int, j3: int) -> bytes:
+    j1_clamped = max(0, min(180, int(round(j1))))
+    j2_clamped = max(0, min(180, int(round(j2))))
+    j3_clamped = max(0, min(180, int(round(j3))))
+
+    payload = f"DRV,{j1_clamped},{j2_clamped},{j3_clamped}"
+    if len(payload) > 24:
+        raise ValueError(f"Payload length exceeds 24-byte ceiling: '{payload}'")
+
     checksum = 0
-    for ch in payload:
-        checksum ^= ord(ch)
-    checksum_hex = f"{checksum:02X}"
+    for char in payload:
+        checksum ^= ord(char)
 
-    full_frame = f"@{payload}*{checksum_hex}\n"
-    return full_frame.encode("ascii")
+    return f"@{payload}*{checksum:02X}\n".encode("ascii")
 
 
-# =====================================================================
-# THREAD 1: 20 Hz HARDWARE SERIAL LOOP (Vulnerability 4 Mitigation)
-# =====================================================================
-def hardware_serial_worker():
-    global last_commanded_angles
+# --- THREAD 1: HARDWARE DRIVER & SLEW-RATE DISPATCH ---
+def mechatronic_hardware_daemon():
+    global is_serial_connected, interlock_tripped
     ser: Optional[serial.Serial] = None
-    last_tx_time = 0.0
+    last_tx_timestamp = time.time()
 
-    print(f"[SERIAL] Worker thread attached. Target port: {SERIAL_PORT} @ {BAUD_RATE} baud.")
+    def send_frame_and_read_ack(frame_bytes: bytes) -> str:
+        nonlocal ser
+        ser.write(frame_bytes)
+        ser.flush()
+        ack = ser.read(1).decode("ascii", errors="ignore")
+        return ack if ack else "TIMEOUT"
+
+    def execute_safe_hold_recovery():
+        global interlock_tripped
+        with hardware_state_lock:
+            h_frame = build_option_a_frame(*last_known_angles)
+        for _ in range(3):
+            ser.write(h_frame)
+            ser.flush()
+            ser.read(1)
+            time.sleep(0.02)
+        with hardware_state_lock:
+            interlock_tripped = False
 
     while not shutdown_event.is_set():
-        cycle_start = time.perf_counter()
-
-        # Step 1: Manage Port Connection
         if ser is None or not ser.is_open:
-            is_serial_connected.clear()
             try:
-                ser = serial.Serial(
-                    port=SERIAL_PORT,
-                    baudrate=BAUD_RATE,
-                    timeout=0.03,        # Non-blocking 30 ms read timeout
-                    write_timeout=0.05
-                )
-                time.sleep(2.0)          # Settle bootloader DTR toggle
+                ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0.5)
+                time.sleep(2.0)
                 ser.reset_input_buffer()
                 ser.reset_output_buffer()
-                is_serial_connected.set()
-                print(f"[SERIAL] Physical link established on {SERIAL_PORT}")
-            except (serial.SerialException, FileNotFoundError, PermissionError) as err:
-                print(f"[SERIAL_DISCONNECTED] Retrying in 1.0s: {err}")
+                with hardware_state_lock:
+                    is_serial_connected = True
+                    interlock_tripped = False
+                home_frame = build_option_a_frame(90, 90, 90)
+                ack = send_frame_and_read_ack(home_frame)
+                last_tx_timestamp = time.time()
+                if db_manager:
+                    db_manager.enqueue_log(90, 90, 90, "VERIFIED", ack, "DISPATCH")
+            except (serial.SerialException, FileNotFoundError, PermissionError):
+                with hardware_state_lock:
+                    is_serial_connected = False
                 time.sleep(1.0)
                 continue
 
-        # Step 2: Determine Frame to Transmit (Work Item vs. Watchdog Keep-Alive)
-        target = None
-        is_keepalive = False
+        # Dequeue waypoint or pop intermediate slew waypoint
+        next_waypoint = None
+        with queue_lock:
+            if waypoint_queue:
+                next_waypoint = waypoint_queue.popleft()
 
-        if waypoint_queue:
-            target = waypoint_queue.popleft()
-            with last_commanded_lock:
-                last_commanded_angles = {
-                    "joint_1": target["joint_1"],
-                    "joint_2": target["joint_2"],
-                    "joint_3": target["joint_3"]
-                }
-        elif (time.perf_counter() - last_tx_time) >= WATCHDOG_KEEPALIVE_INTERVAL:
-            # Starvation prevention: transmit current holding angle to reset 3000ms watchdog
-            with last_commanded_lock:
-                target = dict(last_commanded_angles)
-            is_keepalive = True
+        if next_waypoint is not None:
+            with hardware_state_lock:
+                target_joint_angles[0] = next_waypoint[0]
+                target_joint_angles[1] = next_waypoint[1]
+                target_joint_angles[2] = next_waypoint[2]
 
-        # Step 3: Transmit and Handle Silicon Response
-        if target:
-            try:
-                frame_bytes = build_option_a_frame(target["joint_1"], target["joint_2"], target["joint_3"])
-                ser.write(frame_bytes)
-                ser.flush()
-                last_tx_time = time.perf_counter()
+        # Slew-Rate Step Calculation: limit delta per joint
+        with hardware_state_lock:
+            curr = list(last_known_angles)
+            targ = list(target_joint_angles)
 
-                # Read 1-byte ACK from ATmega328P ('K', 'E', or 'H')
-                ack_byte = ser.read(1).decode("ascii", errors="ignore")
-                status_code = ack_byte if ack_byte else "TIMEOUT"
+        step_angles = []
+        needs_motion = False
+        for c, t in zip(curr, targ):
+            diff = t - c
+            if diff != 0:
+                needs_motion = True
+                step = min(abs(diff), SLEW_RATE_MAX_DELTA_DEG)
+                step_angles.append(c + (step if diff > 0 else -step))
+            else:
+                step_angles.append(c)
 
-                # Safe-Hold ('H') Recovery: Execute 3-frame handshake burst
-                if status_code == "H":
-                    print("[WATCHDOG_TRIP] Hardware latched in Safe-Hold ('H'). Disagreeing queue cleared.")
-                    waypoint_queue.clear()
-                    
-                    # 3 consecutive valid holding frames prove link recovery to firmware
-                    with last_commanded_lock:
-                        recovery_frame = build_option_a_frame(
-                            last_commanded_angles["joint_1"],
-                            last_commanded_angles["joint_2"],
-                            last_commanded_angles["joint_3"]
-                        )
-                    for _ in range(3):
-                        time.sleep(0.05)
-                        ser.write(recovery_frame)
-                        ser.flush()
-                 
-                    status_code = "RECOVERING"
+        now = time.time()
+        ack = None
+        cmd_type = None
 
-                # Log non-blocking telemetry event to SQLite
-                db.log_telemetry(
-                    joint_1=target["joint_1"],
-                    joint_2=target["joint_2"],
-                    joint_3=target["joint_3"],
-                    checksum="VERIFIED",
-                    status_code=status_code,
-                    source="HEARTBEAT" if is_keepalive else "DISPATCH"
-                )
+        try:
+            if needs_motion:
+                frame = build_option_a_frame(*step_angles)
+                ack = send_frame_and_read_ack(frame)
+                last_tx_timestamp = now
+                cmd_type = "DISPATCH"
+                with hardware_state_lock:
+                    last_known_angles[0] = step_angles[0]
+                    last_known_angles[1] = step_angles[1]
+                    last_known_angles[2] = step_angles[2]
+            elif (now - last_tx_timestamp) >= KEEP_ALIVE_INTERVAL_SEC:
+                with hardware_state_lock:
+                    hb_frame = build_option_a_frame(*last_known_angles)
+                    hb_angles = list(last_known_angles)
+                ack = send_frame_and_read_ack(hb_frame)
+                last_tx_timestamp = now
+                cmd_type = "HEARTBEAT"
+                step_angles = hb_angles
 
-            except (serial.SerialException, serial.SerialTimeoutException) as err:
-                print(f"[SERIAL_IO_ERROR] Link failure during transmission: {err}")
+            if ack is not None:
+                if ack == "H":
+                    with hardware_state_lock:
+                        interlock_tripped = True
+                    execute_safe_hold_recovery()
+
+                if db_manager:
+                    db_manager.enqueue_log(
+                        step_angles[0], step_angles[1], step_angles[2],
+                        "VERIFIED", ack, cmd_type
+                    )
+
+        except (serial.SerialException, OSError):
+            with hardware_state_lock:
+                is_serial_connected = False
+            if ser:
                 try:
                     ser.close()
                 except Exception:
                     pass
-                ser = None
-                is_serial_connected.clear()
-                continue
+            ser = None
+            time.sleep(1.0)
+            continue
 
-        # Step 4: Deterministic 20 Hz Timing Slot (50 ms)
-        elapsed = time.perf_counter() - cycle_start
-        sleep_time = max(0.0, CYCLE_INTERVAL - elapsed)
-        time.sleep(sleep_time)
+        time.sleep(0.02)  # 20ms deterministic control tick (50 Hz)
 
-    # Teardown
     if ser and ser.is_open:
         ser.close()
-    print("[SERIAL] Hardware worker thread terminated gracefully.")
 
 
-# =====================================================================
-# LIFESPAN & FASTAPI APPLICATION
-# =====================================================================
+# --- LIFESPAN CONTEXT ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Launch real-time serial loop in background thread
-    worker_thread = threading.Thread(target=hardware_serial_worker, name="HardwareSerialLoop", daemon=True)
-    worker_thread.start()
+    global db_manager
+    db_manager = DatabaseManager(DB_PATH)
+    if hasattr(db_manager, "start"):
+        db_manager.start()
+    elif hasattr(db_manager, "initialize_database"):
+        db_manager.initialize_database()
+    driver_thread = threading.Thread(target=mechatronic_hardware_daemon, daemon=True)
+    driver_thread.start()
     yield
-    print("[SYSTEM] Stopping orchestrator node...")
     shutdown_event.set()
-    worker_thread.join(timeout=1.0)
-    db.shutdown()
-
-app = FastAPI(
-    title="AutoRoboticArms Core Orchestrator",
-    version="1.2.0",
-    lifespan=lifespan
-)
+    driver_thread.join(timeout=2.0)
+    if db_manager:
+        db_manager.stop()
 
 
-# =====================================================================
-# PYDANTIC INGRESS MODELS
-# =====================================================================
-class Waypoint(BaseModel):
-    joint_1: int = Field(..., ge=0, le=180, description="Shoulder azimuth angle")
-    joint_2: int = Field(..., ge=0, le=180, description="Elbow pitch angle")
-    joint_3: int = Field(..., ge=0, le=180, description="Wrist pitch angle")
+# --- FASTAPI INGRESS ---
+app = FastAPI(title="Hardened Microservices Node", lifespan=lifespan)
 
 
-# =====================================================================
-# API ENDPOINTS
-# =====================================================================
-@app.get("/api/v1/health")
-async def health_check():
-    return {
-        "status": "ONLINE",
-        "serial_bus_nominal": is_serial_connected.is_set(),
-        "active_queue_backlog": len(waypoint_queue),
-        "target_port": SERIAL_PORT
-    }
+@app.post("/api/v1/waypoint", status_code=status.HTTP_200_OK)
+async def post_waypoint(wp: WaypointRequest):
+    with queue_lock:
+        if len(waypoint_queue) >= QUEUE_MAX_CAPACITY:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Hardened FIFO Queue Saturated (Backpressure Tripped)"
+            )
+        waypoint_queue.append((wp.joint_1, wp.joint_2, wp.joint_3))
+        depth = len(waypoint_queue)
 
-@app.post("/api/v1/waypoint")
-async def enqueue_waypoint(waypoint: Waypoint):
-    if len(waypoint_queue) >= 10000:
+    if db_manager:
+        db_manager.enqueue_log(wp.joint_1, wp.joint_2, wp.joint_3, "N/A", "RECV", "INGRESS")
+
+    return {"status": "ENQUEUED", "queue_depth": depth}
+
+
+@app.post("/api/v1/cartesian", status_code=status.HTTP_200_OK)
+async def post_cartesian(target: CartesianRequest):
+    """
+    Accepts 3D Cartesian coordinates (X, Y, Z in cm), validates reachability,
+    solves geometric IK, and queues the resultant clamped joint angles.
+    """
+    try:
+        angles = calculate_joint_angles(target.x, target.y, target.z)
+    except WorkspaceEnvelopeViolation as exc:
         raise HTTPException(
-            status_code=503,
-            detail="Active queue backlog full. Hardware buffer saturated."
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"GEOMETRIC_WORKSPACE_BREACH: {str(exc)}"
         )
 
-    # Append to cross-thread FIFO queue
-    waypoint_dict = waypoint.model_dump()
-    waypoint_queue.append(waypoint_dict)
+    j1, j2, j3 = angles["base"], angles["shoulder"], angles["elbow"]
 
-    # Ingress persistence snapshot
-    db.log_telemetry(
-        joint_1=waypoint.joint_1,
-        joint_2=waypoint.joint_2,
-        joint_3=waypoint.joint_3,
-        checksum="N/A",
-        status_code="RECV",
-        source="INGRESS"
-    )
+    with queue_lock:
+        if len(waypoint_queue) >= QUEUE_MAX_CAPACITY:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Hardened FIFO Queue Saturated (Backpressure Tripped)"
+            )
+        waypoint_queue.append((j1, j2, j3))
+        depth = len(waypoint_queue)
 
-    return {"status": "ENQUEUED", "queue_depth": len(waypoint_queue)}
+    if db_manager:
+        db_manager.enqueue_log(j1, j2, j3, "N/A", "RECV", "INGRESS")
 
-@app.get("/api/v1/telemetry")
-async def get_telemetry():
-    # Ephemeral read via SQLite WAL mode
-    rows = db.get_recent_telemetry(limit=50)
-    return {"status": "ONLINE", "telemetry_logs": rows}
+    return {
+        "status": "ENQUEUED",
+        "solved_angles": {"joint_1": j1, "joint_2": j2, "joint_3": j3},
+        "queue_depth": depth
+    }
+
+
+@app.get("/api/v1/telemetry", status_code=status.HTTP_200_OK)
+async def get_telemetry(limit: int = 50):
+    if not db_manager:
+        raise HTTPException(status_code=500, detail="DatabaseManager uninitialized")
+    rows = db_manager.fetch_recent_logs(limit=limit)
+    return {"count": len(rows), "records": rows}
+
+
+@app.get("/api/v1/health", status_code=status.HTTP_200_OK)
+async def get_health():
+    with hardware_state_lock:
+        nominal = is_serial_connected and not interlock_tripped
+        status_str = "NOMINAL" if nominal else "DEGRADED"
+        serial_status = is_serial_connected
+        safe_hold = interlock_tripped
+        current_pose = list(last_known_angles)
+
+    with queue_lock:
+        q_depth = len(waypoint_queue)
+
+    return {
+        "status": status_str,
+        "serial_bus_nominal": serial_status,
+        "safe_hold_tripped": safe_hold,
+        "current_pose": current_pose,
+        "queue_backlog": q_depth
+    }
