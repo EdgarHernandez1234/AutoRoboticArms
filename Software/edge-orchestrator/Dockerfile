@@ -51,7 +51,7 @@ RUN pip install --no-cache-dir --no-index --find-links=/tmp/wheels -r requiremen
 COPY --chown=appuser:appgroup orchestrator_node.py .
 COPY --chown=appuser:appgroup database_manager.py .
 COPY --chown=appuser:appgroup kinematics.py .
-
+COPY --chown=appuser:appgroup trajectory.py .
 # Enforce secure directory ownership, sealing files against runtime modifications
 RUN chown -R appuser:appgroup /app
 
