@@ -54,7 +54,7 @@ Cloud Layer operates as an out-of-band data fabric. It decouples real-time hardw
 
 ---
 
-## 📊 Sprint Progression & Engineering Milestones
+## Sprint Progression & Engineering Milestones
 
 ### Sprint 1: Relational Persistence Tier & Dynamic Engine Factory
 * Engineered single-file SQLite database (`production_node.db`) separating persistent configuration data (`node_configurations`) from high-frequency volatile telemetry (`telemetry_ingress_queue`).
@@ -87,7 +87,7 @@ Cloud Layer operates as an out-of-band data fabric. It decouples real-time hardw
 
 ---
 
-## 🚀 Quickstart & Verification
+## Quickstart & Verification
 
 ### 1. Prerequisites
 * Docker Engine 24.0+ and Docker Compose v2+
