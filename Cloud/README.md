@@ -123,7 +123,6 @@ docker compose logs cloud-sync --tail 25
 
 ```
 
-```
 
 ---
 
