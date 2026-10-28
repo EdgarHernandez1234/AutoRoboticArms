@@ -1,0 +1,20 @@
+services:
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: autoroboticarms_orchestrator
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - SERIAL_PORT=/dev/ttyACM0
+      - BAUD_RATE=115200
+      - DB_PATH=/app/telemetry.db
+      - PYTHONUNBUFFERED=1
+    devices:
+      - "/dev/ttyACM0:/dev/ttyACM0"
+    group_add:
+      - 20 # Host 'dialout' GID pass-through for unprivileged UID 10001
+    volumes:
+      - ./telemetry.db:/app/telemetry.db
