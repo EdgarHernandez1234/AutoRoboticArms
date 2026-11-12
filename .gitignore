@@ -323,3 +323,40 @@ test_storage_sandbox/
 *.out
 *.o
 *.hex
+# Environment & Secrets
+.env
+*.pem
+*.key
+*.crt
+*token*.json
+*credentials*.json
+
+# Runtime Databases & Logs
+*.db
+*.db-wal
+*.db-shm
+*.log
+data/
+
+# Reinforcement Learning Artifacts & TensorBoard
+rl_training/tensorboard_logs/
+events.out.tfevents.*
+evaluations.npz
+rl_training/models/ppo_arm_checkpoint_*.zip
+rl_training/models/ppo_arm_final.zip
+# Keep best_model.zip tracked for reproducible sim-to-real deployment:
+!rl_training/models/best_model.zip
+
+# Python Virtual Environments & Packaging
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# OS & Editor Metadata
+.DS_Store
+.vscode/
