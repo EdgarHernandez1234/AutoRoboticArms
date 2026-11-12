@@ -7,3 +7,5 @@ tensorboard>=2.16.0
 scipy>=1.11.0
 matplotlib>=3.8.0
 pytest>=8.0.0
+
+# pip freeze | grep -E "^(numpy|torch|gymnasium|stable-baselines3|tensorboard|scipy|matplotlib|pytest)==" > requirements-rl.txt
