@@ -1,101 +1,109 @@
+"""
+database_manager.py
+Thread-isolated, asynchronous SQLite WAL persistence engine.
+Provides micro-batch writing and non-blocking telemetry logging.
+"""
 import sqlite3
 import threading
 import queue
 import time
-from datetime import datetime, timezone
+from typing import List, Dict, Any, Optional
+
 
 class DatabaseManager:
-    def __init__(self, db_path="telemetry.db"):
+    def __init__(self, db_path: str = "telemetry.db", batch_size: int = 10, flush_interval_sec: float = 0.5):
         self.db_path = db_path
-        # Bounded queue prevents infinite memory growth if disk fails
-        self.queue = queue.Queue(maxsize=10000)
-        self.running = True
-        
-        # Launch the dedicated worker thread immediately upon instantiation
-        self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
-        self.worker_thread.start()
+        self.batch_size = batch_size
+        self.flush_interval_sec = flush_interval_sec
+        self.log_queue: queue.Queue = queue.Queue(maxsize=10000)
+        self.shutdown_event = threading.Event()
+        self.worker_thread: Optional[threading.Thread] = None
 
-    def _worker_loop(self):
-        # Establish connection strictly inside the worker thread boundary
-        conn = sqlite3.connect(self.db_path)
+    def _init_db(self, conn: sqlite3.Connection):
         cursor = conn.cursor()
-        
-        # Configure SQLite for high-frequency decoupled writes
         cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute("PRAGMA synchronous=NORMAL;")
-        
-        # Initialize schema
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS telemetry (
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS telemetry_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT,
-                joint_1 INTEGER,
-                joint_2 INTEGER,
-                joint_3 INTEGER,
-                checksum TEXT,
-                status_code TEXT,
-                source TEXT
-            )
-        ''')
+                timestamp REAL NOT NULL,
+                joint_1 INTEGER NOT NULL,
+                joint_2 INTEGER NOT NULL,
+                joint_3 INTEGER NOT NULL,
+                validation_status TEXT NOT NULL,
+                hardware_ack TEXT NOT NULL,
+                command_type TEXT NOT NULL
+            );
+        """)
         conn.commit()
 
-        # Batch processing loop
-        while self.running or not self.queue.empty():
-            try:
-                # Block lightly until a telemetry frame arrives
-                item = self.queue.get(timeout=0.5)
-                if item is None:  # Poison pill for shutdown
-                    break
-                    
-                batch = [item]
-                
-                # Drain remaining items in the queue (up to 50) for micro-batching
-                while not self.queue.empty() and len(batch) < 50:
-                    try:
-                        next_item = self.queue.get_nowait()
-                        if next_item is None:
-                            self.running = False
-                            break
-                        batch.append(next_item)
-                    except queue.Empty:
-                        break
-                
-                # Execute single disk write for the entire batch
-                cursor.executemany('''
-                    INSERT INTO telemetry (timestamp, joint_1, joint_2, joint_3, checksum, status_code, source)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                ''', batch)
-                conn.commit()
-                
-            except queue.Empty:
-                continue
-            except Exception as e:
-                print(f"[DB_WORKER_ERROR] {e}")
-        
+    def start(self):
+        """Initializes tables and starts background flusher thread."""
+        conn = sqlite3.connect(self.db_path)
+        self._init_db(conn)
         conn.close()
 
-    def log_telemetry(self, joint_1: int, joint_2: int, joint_3: int, checksum: str, status_code: str, source="DISPATCH"):
-        timestamp = datetime.now(timezone.utc).isoformat()
+        self.shutdown_event.clear()
+        self.worker_thread = threading.Thread(target=self._flusher_loop, daemon=True)
+        self.worker_thread.start()
+
+    def stop(self):
+        """Signals flusher thread to drain and cleanly exit."""
+        self.shutdown_event.set()
+        if self.worker_thread and self.worker_thread.is_alive():
+            self.worker_thread.join(timeout=2.0)
+
+    def enqueue_log(self, j1: int, j2: int, j3: int, status: str, ack: str, cmd_type: str):
+        record = (time.time(), int(j1), int(j2), int(j3), str(status), str(ack), str(cmd_type))
         try:
-            # Memory-only operation (typically < 5 microseconds)
-            self.queue.put_nowait((timestamp, joint_1, joint_2, joint_3, checksum, status_code, source))
+            self.log_queue.put_nowait(record)
         except queue.Full:
-            print("[DB_QUEUE_FULL] Evicting telemetry frame to prevent hardware starvation")
+            pass  # Drop oldest or shed load to protect real-time timing
 
-    def get_recent_telemetry(self, limit=100):
-        # Open an ephemeral, read-only connection isolated from the worker's write lock
-        try:
-            conn = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True)
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM telemetry ORDER BY id DESC LIMIT ?", (limit,))
-            rows = cursor.fetchall()
-            conn.close()
-            return rows
-        except sqlite3.OperationalError:
-            # Catch scenario where table doesn't exist yet on first boot
-            return []
+    def _flusher_loop(self):
+        conn = sqlite3.connect(self.db_path)
+        last_flush = time.time()
+        batch = []
 
-    def shutdown(self):
-        self.running = False
-        self.queue.put(None)
-        self.worker_thread.join(timeout=2.0)
+        while not self.shutdown_event.is_set() or not self.log_queue.empty():
+            try:
+                item = self.log_queue.get(timeout=0.1)
+                batch.append(item)
+            except queue.Empty:
+                pass
+
+            now = time.time()
+            if (len(batch) >= self.batch_size) or (batch and (now - last_flush) >= self.flush_interval_sec) or (self.shutdown_event.is_set() and batch):
+                cursor = conn.cursor()
+                cursor.executemany("""
+                    INSERT INTO telemetry_logs (timestamp, joint_1, joint_2, joint_3, validation_status, hardware_ack, command_type)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, batch)
+                conn.commit()
+                batch.clear()
+                last_flush = now
+
+        conn.close()
+
+    def fetch_recent_logs(self, limit: int = 50) -> List[Dict[str, Any]]:
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT timestamp, joint_1, joint_2, joint_3, validation_status, hardware_ack, command_type
+            FROM telemetry_logs
+            ORDER BY id DESC LIMIT ?
+        """, (limit,))
+        rows = cursor.fetchall()
+        conn.close()
+        return [
+            {
+                "timestamp": r[0],
+                "joint_1": r[1],
+                "joint_2": r[2],
+                "joint_3": r[3],
+                "validation_status": r[4],
+                "hardware_ack": r[5],
+                "command_type": r[6],
+            }
+            for r in rows
+        ]

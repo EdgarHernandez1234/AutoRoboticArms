@@ -48,15 +48,18 @@ def compute_forward_kinematics(
 
     # Elbow internal angle (90 deg servo = 90 deg bend between L1 and L2)
     # Relative angle of forearm L2 to horizontal plane:
-    theta_2 = theta_1 - math.radians(elbow_deg)
+    theta_2 =  math.radians(elbow_deg)
+
+    # Forearm angle relative to horizontal plane is shoulder angle minus elbow angle
+    theta_3 = theta_1 - theta_2
 
     # Planar radial reach (r) and vertical elevation (z)
-    r = L1_CM * math.cos(theta_1) + L2_CM * math.cos(theta_2)
-    z = L1_CM * math.sin(theta_1) + L2_CM * math.sin(theta_2)
+    r = L1_CM * math.cos(theta_1) + L2_CM * math.cos(theta_3)
+    z = L1_CM * math.sin(theta_1) + L2_CM * math.sin(theta_3)
 
     # Project radial reach onto X-Y Cartesian plane
-    x = r * math.sin(yaw_rad)
-    y = r * math.cos(yaw_rad)
+    x = r * math.cos(yaw_rad)
+    y = r * math.sin(yaw_rad)
 
     return (round(x, 4), round(y, 4), round(z, 4))
 

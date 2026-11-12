@@ -1,0 +1,7 @@
+fastapi==0.111.0         # Ultra-fast ASGI network backplane engine
+uvicorn[standard]==0.30.1 # High-performance web process server loop
+pydantic==2.7.4          # Bounded validation parameters & strict string modeling
+pyserial==3.5            # Direct Linux file descriptor interaction loop with Arduino
+sqlmodel==0.0.19         # Relational data schemas mapping natively down to SQLite
+websockets==12.0         # Full-duplex telemetry visual pipeline channel handler
+numpy==1.26.4            # Fast matrix mathematical calculation loops for local IK
