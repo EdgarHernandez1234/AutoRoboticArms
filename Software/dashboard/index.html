@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AutoRoboticArms — Edge Control &amp; Telemetry Plane</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="pulse-dot" id="ws-indicator"></span>
+      <h1>AutoRoboticArms <span class="badge-outline">OPTION B EDGE</span></h1>
+    </div>
+    <div class="status-pills">
+      <span class="pill" id="pill-ws">WS: CONNECTING</span>
+      <span class="pill" id="pill-health">SYSTEM: UNKNOWN</span>
+      <span class="pill" id="pill-ack">ACK: --</span>
+    </div>
+  </header>
+
+  <main class="grid-layout">
+    <!-- Panel 1: Live Joint Actuators -->
+    <section class="card">
+      <h2>Joint Actuators (0° – 180°)</h2>
+      <div class="joint-row">
+        <div class="joint-meta">
+          <span>Joint 1 · Base Yaw</span>
+          <strong id="val-j1">90°</strong>
+        </div>
+        <div class="bar-track"><div class="bar-fill" id="bar-j1" style="width: 50%"></div></div>
+      </div>
+      <div class="joint-row">
+        <div class="joint-meta">
+          <span>Joint 2 · Shoulder Pitch</span>
+          <strong id="val-j2">90°</strong>
+        </div>
+        <div class="bar-track"><div class="bar-fill" id="bar-j2" style="width: 50%"></div></div>
+      </div>
+      <div class="joint-row">
+        <div class="joint-meta">
+          <span>Joint 3 · Elbow Pitch</span>
+          <strong id="val-j3">90°</strong>
+        </div>
+        <div class="bar-track"><div class="bar-fill" id="bar-j3" style="width: 50%"></div></div>
+      </div>
+    </section>
+
+    <!-- Panel 2: 3D End-Effector & Queue Metrics -->
+    <section class="card">
+      <h2>3D End-Effector Pose (FK)</h2>
+      <div class="xyz-grid">
+        <div class="metric-box">
+          <span class="metric-label">X (Forward)</span>
+          <span class="metric-value" id="val-x">10.00 cm</span>
+        </div>
+        <div class="metric-box">
+          <span class="metric-label">Y (Left / Right)</span>
+          <span class="metric-value" id="val-y">0.00 cm</span>
+        </div>
+        <div class="metric-box">
+          <span class="metric-label">Z (Elevation)</span>
+          <span class="metric-value" id="val-z">12.00 cm</span>
+        </div>
+      </div>
+      <div class="sub-metrics">
+        <div>FIFO Queue Backlog: <strong id="val-backlog">0 / 200</strong></div>
+        <div>Last Frame Type: <strong id="val-cmd">--</strong></div>
+      </div>
+    </section>
+
+    <!-- Panel 3: Authenticated Perimeter Controls -->
+    <section class="card">
+      <h2>Perimeter Command Gate</h2>
+      <div class="auth-row">
+        <label for="api-key-input">X-API-Key Token</label>
+        <input type="password" id="api-key-input" placeholder="Enter CONTROL_PLANE_API_KEY" />
+      </div>
+
+      <form id="cartesian-form" class="coord-form">
+        <div class="coord-inputs">
+          <label>X (cm)<input type="number" id="in-x" step="0.5" value="12.0" required /></label>
+          <label>Y (cm)<input type="number" id="in-y" step="0.5" value="4.0" required /></label>
+          <label>Z (cm)<input type="number" id="in-z" step="0.5" value="9.0" required /></label>
+        </div>
+        <div class="btn-row">
+          <button type="submit" class="btn btn-primary">Dispatch Target</button>
+          <button type="button" id="btn-home" class="btn btn-secondary">Home (10, 0, 12)</button>
+          <button type="button" id="btn-estop" class="btn btn-danger">E-STOP</button>
+        </div>
+      </form>
+      <p class="cmd-feedback" id="cmd-feedback">Ready. Enter API key to dispatch commands.</p>
+    </section>
+
+    <!-- Panel 4: Live Telemetry Stream Log -->
+    <section class="card card-wide">
+      <div class="log-header">
+        <h2>Real-Time Telemetry Stream</h2>
+        <button type="button" id="btn-clear-log" class="btn btn-small">Clear</button>
+      </div>
+      <div class="log-console" id="log-console"></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

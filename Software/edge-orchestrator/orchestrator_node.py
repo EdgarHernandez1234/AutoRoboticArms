@@ -7,16 +7,21 @@ Cartesian Spatial Kinematic Ingress, Slew-Rate Limiting, and WAL Persistence.
 import os
 import time
 import serial
+import asyncio
+import secrets
 import threading
 from collections import deque
 from contextlib import asynccontextmanager
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Header, Depends, WebSocket, WebSocketDisconnect, status
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ConfigDict
+
 
 from database_manager import DatabaseManager
 from kinematics import calculate_joint_angles, WorkspaceEnvelopeViolation
+from forward_kinematics import compute_forward_kinematics
 from trajectory import TrajectoryPlanner
 
 # --- CONFIGURATION CONSTANTS ---
@@ -28,6 +33,17 @@ WATCHDOG_TIMEOUT_SEC = 3.0
 HEARTBEAT_INTERVAL_SEC = 1.5
 DB_PATH = os.getenv("DB_PATH", "telemetry.db")
 SLEW_RATE_MAX_DELTA_DEG = 2  # Max degree step per 20ms tick (~100 deg/s)
+
+# Security Perimeter Settings
+CONTROL_PLANE_API_KEY = os.getenv("CONTROL_PLANE_API_KEY", "dev-local-perimeter-key")
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "ALLOWED_ORIGINS",
+        "http://localhost,http://localhost:80,http://localhost:8000,http://127.0.0.1"
+    ).split(",")
+    if origin.strip()
+]
 
 # --- THREAD-SAFE CONCURRENCY STATE ---
 waypoint_queue: deque = deque(maxlen=QUEUE_MAX_CAPACITY)
@@ -42,6 +58,66 @@ last_dispatch_time = 0.0
 
 db_manager: Optional[DatabaseManager] = None
 trajectory_planner = TrajectoryPlanner(step_size_cm=0.5)
+main_event_loop: Optional[asyncio.AbstractEventLoop] = None
+
+# --- BOUNDED WEBSOCKET CONNECTION MANAGER ---
+class ConnectionManager:
+    """
+    Manages full-duplex WebSocket telemetry subscribers with strict 100ms
+    send timeouts to prune lagging or disconnected clients without backpressure.
+    """
+
+    def __init__(self, send_timeout_sec: float = 0.1):
+        self.active_connections: List[WebSocket] = []
+        self.send_timeout_sec = send_timeout_sec
+        self._lock = asyncio.Lock()
+
+    async def connect(self, websocket: WebSocket) -> None:
+        await websocket.accept()
+        async with self._lock:
+            self.active_connections.append(websocket)
+
+    async def disconnect(self, websocket: WebSocket) -> None:
+        async with self._lock:
+            if websocket in self.active_connections:
+                self.active_connections.remove(websocket)
+
+    async def broadcast_json(self, payload: dict) -> None:
+        async with self._lock:
+            clients = list(self.active_connections)
+
+        if not clients:
+            return
+
+        stale_clients: List[WebSocket] = []
+        for ws in clients:
+            try:
+                await asyncio.wait_for(ws.send_json(payload), timeout=self.send_timeout_sec)
+            except Exception:
+                stale_clients.append(ws)
+
+        if stale_clients:
+            async with self._lock:
+                for ws in stale_clients:
+                    if ws in self.active_connections:
+                        self.active_connections.remove(ws)
+
+
+ws_manager = ConnectionManager(send_timeout_sec=0.1)
+
+def broadcast_telemetry_threadsafe(payload: dict) -> None:
+    """Safely bridges telemetry frames from Thread 1 (serial loop) into Thread 2 (asyncio)."""
+    if main_event_loop and main_event_loop.is_running() and ws_manager.active_connections:
+        asyncio.run_coroutine_threadsafe(ws_manager.broadcast_json(payload), main_event_loop)
+
+
+# --- SECURITY DEPENDENCY GATE ---
+async def verify_api_key(x_api_key: Optional[str] = Header(default=None, alias="X-API-Key")) -> None:
+    if not x_api_key or not secrets.compare_digest(x_api_key, CONTROL_PLANE_API_KEY):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="UNAUTHORIZED_PERIMETER_ACCESS: Invalid or missing X-API-Key header"
+        )
 
 # --- PYDANTIC SCHEMAS ---
 class WaypointRequest(BaseModel):
@@ -69,7 +145,8 @@ def build_option_a_frame(cmd: str, j1: int, j2: int, j3: int) -> bytes:
     j1 = max(0, min(180, int(j1)))
     j2 = max(0, min(180, int(j2)))
     j3 = max(0, min(180, int(j3)))
-    payload = f"@{cmd},{j1},{j2},{j3}"
+    # Checksum excludes leading '@' delimiter per ATmega328P firmware parser
+    payload = f"{cmd},{j1},{j2},{j3}"
     if len(payload) > 24:
         raise ValueError("Payload exceeds 24-byte boundary")
 
@@ -77,7 +154,7 @@ def build_option_a_frame(cmd: str, j1: int, j2: int, j3: int) -> bytes:
     for ch in payload:
         checksum ^= ord(ch)
 
-    return f"{payload}*{checksum:02X}\n".encode("ascii")
+    return f"@{payload}*{checksum:02X}\n".encode("ascii")
 
 
 # --- HARDWARE WORKER DAEMON (THREAD 1) ---
@@ -107,6 +184,7 @@ def mechatronic_hardware_daemon():
         with queue_lock:
             if waypoint_queue:
                 target_joint_angles = list(waypoint_queue.popleft())
+            backlog = len(waypoint_queue)
 
         # Slew-Rate Limiter (Interpolation Step)
         moved = False
@@ -122,7 +200,8 @@ def mechatronic_hardware_daemon():
         now = time.time()
 
         if moved or (now - last_dispatch_time >= HEARTBEAT_INTERVAL_SEC):
-            cmd = "DRV" if moved else "HBT"
+            cmd = "DRV"
+            event_tag = "DISPATCH" if moved else "HEARTBEAT"
             frame = build_option_a_frame(cmd, last_known_angles[0], last_known_angles[1], last_known_angles[2])
             try:
                 ser.write(frame)
@@ -137,11 +216,31 @@ def mechatronic_hardware_daemon():
                     elif "E" in line or "H" in line:
                         ack = line
                         safe_hold_tripped = True
+                val_status = "SAFE_HOLD" if safe_hold_tripped else "NOMINAL"
                 if db_manager:
                     db_manager.enqueue_log(
                         last_known_angles[0], last_known_angles[1], last_known_angles[2],
-                        "NOMINAL", ack, cmd
+                        val_status, ack, event_tag
                     )
+                # Compute live 3D Cartesian pose and broadcast to WebSocket subscribers
+                fk_x, fk_y, fk_z = compute_forward_kinematics(
+                    last_known_angles[0], last_known_angles[1], last_known_angles[2]
+                )
+                broadcast_telemetry_threadsafe({
+                    "timestamp": round(now, 3),
+                    "joints": {
+                        "base": last_known_angles[0],
+                        "shoulder": last_known_angles[1],
+                        "elbow": last_known_angles[2],
+                    },
+                    "cartesian": {"x": fk_x, "y": fk_y, "z": fk_z},
+                    "status": val_status,
+                    "serial_bus_nominal": serial_bus_nominal,
+                    "safe_hold_tripped": safe_hold_tripped,
+                    "hardware_ack": ack,
+                    "command_type": event_tag,
+                    "queue_backlog": backlog,
+                })
             except Exception:
                 serial_bus_nominal = False
                 ser.close()
@@ -177,21 +276,64 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AutoRoboticArms Orchestrator Node", lifespan=lifespan)
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "X-API-Key"],
+)
 
+# --- FULL-DUPLEX TELEMETRY WEBSOCKET ---
+@app.websocket("/ws/telemetry")
+async def websocket_telemetry(websocket: WebSocket):
+    await ws_manager.connect(websocket)
+    try:
+        # Send immediate initial state snapshot upon connection
+        fk_x, fk_y, fk_z = compute_forward_kinematics(*last_known_angles)
+        with queue_lock:
+            backlog = len(waypoint_queue)
+        await websocket.send_json({
+            "timestamp": round(time.time(), 3),
+            "joints": {
+                "base": last_known_angles[0],
+                "shoulder": last_known_angles[1],
+                "elbow": last_known_angles[2],
+            },
+            "cartesian": {"x": fk_x, "y": fk_y, "z": fk_z},
+            "status": "NOMINAL" if serial_bus_nominal and not safe_hold_tripped else "DEGRADED",
+            "serial_bus_nominal": serial_bus_nominal,
+            "safe_hold_tripped": safe_hold_tripped,
+            "hardware_ack": "K",
+            "command_type": "SYNC",
+            "queue_backlog": backlog,
+        })
+        while True:
+            # Keep socket alive without blocking server broadcast loop
+            await asyncio.sleep(3600)
+    except WebSocketDisconnect:
+        await ws_manager.disconnect(websocket)
+    except Exception:
+        await ws_manager.disconnect(websocket)
+
+# REST API ENDPOINTS
 @app.get("/api/v1/health")
 async def get_health():
     with queue_lock:
         backlog = len(waypoint_queue)
+    fk_x, fk_y, fk_z = compute_forward_kinematics(*last_known_angles)
     return {
         "status": "NOMINAL" if serial_bus_nominal and not safe_hold_tripped else "DEGRADED",
         "serial_bus_nominal": serial_bus_nominal,
         "safe_hold_tripped": safe_hold_tripped,
         "current_pose": last_known_angles,
-        "queue_backlog": backlog
+        "cartesian_pose": {"x": fk_x, "y": fk_y, "z": fk_z},
+        "queue_backlog": backlog,
+        "ws_clients": len(ws_manager.active_connections),
     }
 
 
-@app.post("/api/v1/waypoint", status_code=status.HTTP_200_OK)
+@app.post("/api/v1/waypoint", status_code=status.HTTP_200_OK, dependencies=[Depends(verify_api_key)])
 async def post_waypoint(wp: WaypointRequest):
     with queue_lock:
         if len(waypoint_queue) >= QUEUE_MAX_CAPACITY:
@@ -208,7 +350,7 @@ async def post_waypoint(wp: WaypointRequest):
     return {"status": "ENQUEUED", "queue_depth": depth}
 
 
-@app.post("/api/v1/cartesian", status_code=status.HTTP_200_OK)
+@app.post("/api/v1/cartesian", status_code=status.HTTP_200_OK, dependencies=[Depends(verify_api_key)])
 async def post_cartesian(target: CartesianPoint):
     try:
         angles = calculate_joint_angles(target.x, target.y, target.z)
@@ -238,8 +380,7 @@ async def post_cartesian(target: CartesianPoint):
         "queue_depth": depth
     }
 
-
-@app.post("/api/v1/trajectory", status_code=status.HTTP_200_OK)
+@app.post("/api/v1/trajectory", status_code=status.HTTP_200_OK, dependencies=[Depends(verify_api_key)])
 async def post_trajectory(req: TrajectoryRequest):
     """
     Subdivides Cartesian multi-waypoint paths into equidistant linear steps,
@@ -249,7 +390,6 @@ async def post_trajectory(req: TrajectoryRequest):
     pts = [(p.x, p.y, p.z) for p in req.waypoints]
     custom_planner = TrajectoryPlanner(step_size_cm=req.step_size_cm)
 
-    # Atomic envelope validation across the entire continuous trajectory
     try:
         joint_trajectory = custom_planner.generate_joint_trajectory(pts)
     except WorkspaceEnvelopeViolation as exc:
@@ -279,6 +419,26 @@ async def post_trajectory(req: TrajectoryRequest):
         "queue_depth": depth
     }
 
+@app.post("/api/v1/estop", status_code=status.HTTP_200_OK, dependencies=[Depends(verify_api_key)])
+async def post_emergency_stop():
+    """Flushes any queued trajectories and locks target angles to the current pose."""
+    global target_joint_angles
+    with queue_lock:
+        dropped = len(waypoint_queue)
+        waypoint_queue.clear()
+        target_joint_angles = list(last_known_angles)
+
+    if db_manager:
+        db_manager.enqueue_log(
+            last_known_angles[0], last_known_angles[1], last_known_angles[2],
+            "ESTOP", "H", "EMERGENCY_HALT"
+        )
+
+    return {
+        "status": "HALTED",
+        "dropped_waypoints": dropped,
+        "held_pose": last_known_angles,
+    }
 
 @app.get("/api/v1/telemetry")
 async def get_telemetry(limit: int = 50):
