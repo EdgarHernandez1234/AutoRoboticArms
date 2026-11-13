@@ -31,12 +31,12 @@ def http_get_json(url: str, timeout: float = 3.0) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def http_post_json(url: str, payload: dict, timeout: float = 5.0) -> Tuple[int, dict]:
+def http_post_json(url: str, payload: dict, api_key: str, timeout: float = 5.0) -> Tuple[int, dict]:
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url,
         data=data,
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", "X-API-Key": api_key},
         method="POST",
     )
     try:
@@ -117,6 +117,8 @@ def main():
     parser.add_argument("--z", type=float, default=8.0, help="Target Z coordinate (cm)")
     parser.add_argument("--return-home", action="store_true", help="Return to neutral L-pose (10, 0, 12) after reaching target")
     parser.add_argument("--dry-run", action="store_true", help="Simulate policy trajectory without sending HTTP commands")
+    parser.add_argument("--api-key",type=str,default=os.getenv("CONTROL_PLANE_API_KEY", "dev-local-perimeter-key"), help="X-API-Key token for edge orchestrator authentication",
+)
     args = parser.parse_args()
 
     base_url = f"http://{args.host}:{args.port}"
@@ -145,7 +147,7 @@ def main():
     traj_url = f"{base_url}/api/v1/trajectory"
     payload = {"waypoints": waypoints, "step_size_cm": 0.5}
     print(f"[*] Dispatching {len(waypoints)} RL waypoints to {traj_url}...")
-    status_code, resp_body = http_post_json(traj_url, payload)
+    status_code, resp_body = http_post_json(traj_url, payload, args.api_key)
 
     if status_code != 200:
         raise RuntimeError(f"Trajectory rejected (HTTP {status_code}): {resp_body}")
