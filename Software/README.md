@@ -1,6 +1,6 @@
-# AutoRoboticArms — Option B: Hardened Edge Control Plane & Embodied AI Node
+# AutoRoboticArms — Software Layer: Hardened Edge Control Plane & Embodied AI Node
 
-**Option B** is the containerized local edge control plane, perimeter security gateway, and Reinforcement Learning (RL) sim-to-real execution stack for the **AutoRoboticArms** 3-DoF robotic manipulator.
+**Software Layer** is the containerized local edge control plane, perimeter security gateway, and Reinforcement Learning (RL) sim-to-real execution stack for the **AutoRoboticArms** 3-DoF robotic manipulator.
 
 It bridges high-level autonomous policies and browser operators on a workstation with deterministic, real-time serial actuation on an Ubuntu edge server connected to an ATmega328P / PCA9685 servo controller.
 
@@ -47,7 +47,7 @@ It bridges high-level autonomous policies and browser operators on a workstation
 ## Repository Structure
 
 ```text
-optionb/
+Software/
 ├── docker-compose.yml              # Multi-container orchestration (NGINX perimeter + FastAPI node)
 ├── .env.example                    # Template for CONTROL_PLANE_API_KEY & serial configuration
 ├── nginx/
