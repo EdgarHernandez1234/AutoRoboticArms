@@ -1,5 +1,5 @@
 # Python ver 3.11.9: Reinforcement Learning & Sim-to-Real Workstation Dependencies
-numpy<2.0
+numpy<2.0             # numpy==1.26.4 Fast matrix mathematical calculation loops for local IK
 torch==2.2.2
 gymnasium>=1.0.0
 stable-baselines3>=2.3.0

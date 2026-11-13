@@ -52,6 +52,7 @@ COPY --chown=appuser:appgroup orchestrator_node.py .
 COPY --chown=appuser:appgroup database_manager.py .
 COPY --chown=appuser:appgroup kinematics.py .
 COPY --chown=appuser:appgroup trajectory.py .
+COPY --chown=appuser:appgroup forward_kinematics.py .
 # Enforce secure directory ownership, sealing files against runtime modifications
 RUN chown -R appuser:appgroup /app
 
@@ -62,4 +63,4 @@ EXPOSE 8000
 USER 1000
 
 # Launch the orchestrator engine via Uvicorn tied strictly to unprivileged loop threads
-CMD ["uvicorn", "orchestrator_node:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+CMD ["uvicorn", "orchestrator_node:app", "--host", "127.0.0.1", "--port", "8000", "--workers", "1"]

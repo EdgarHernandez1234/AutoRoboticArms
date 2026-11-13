@@ -258,6 +258,8 @@ def mechatronic_hardware_daemon():
 # --- FASTAPI LIFECYCLE & INGRESS (THREAD 2) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global main_event_loop, db_manager, serial_thread
+    main_event_loop = asyncio.get_running_loop()
     global db_manager
     db_manager = DatabaseManager(DB_PATH)
     if hasattr(db_manager, "start"):
